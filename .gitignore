@@ -50,3 +50,12 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Additional ignore
+*.log
+*.bat
+*.conf
+cmd_inject_win64.exe
+cmd_inject_win32.exe
+cmd_inject_linux32
+cmd_inject_linux64
