@@ -1,7 +1,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-#define CMD_INJECT_VERSION "v0.1.1"
+#define CMD_INJECT_VERSION "v0.1.2"
 typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
 void append_char_to_dstr(dstr *str,char c,int escape_special)
 {
@@ -78,7 +78,7 @@ void append_argument(char*value)
 			append_string_to_dstr(&log_str,"\n===[Game Argument]===",'\n',0);
 			return;
 		}
-		for(i=tmp->length;i--;)if(tmp->data[i]=='\\'||tmp->data[i]=='/'){satisfy=1;break;}
+		for(i=tmp->length;i--;)if(tmp->data[i]=='\\'||tmp->data[i]=='/')break;
 		if(i<0)i=0;
 		if(tmp->data[++i]=='p'&&tmp->data[i+1]=='r'&&tmp->data[i+2]=='o'&&
 			tmp->data[i+3]=='t'&&tmp->data[i+4]=='o'&&tmp->data[i+5]=='n'){i+=6;satisfy=1;}
