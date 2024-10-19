@@ -1,7 +1,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-#define CMD_INJECT_VERSION "v0.1.2"
+#define CMD_INJECT_VERSION "v0.2.0"
 typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
 void append_char_to_dstr(dstr *str,char c,int escape_special)
 {
@@ -23,33 +23,127 @@ void append_string_to_dstr(dstr*str,char *string,char end_symbol,int write_quote
 	append_char_to_dstr(str,end_symbol,0);
 	return;
 }
-dstr *argvx,log_str,launch_command,injector_path;char buffer[128];
-int steam_index,game_index,arg_index,argix,arglx,injector_path_index;
+int check_for_wine_or_proton_keyword(dstr*tmp,int left_index,int right_index)
+{
+	char backup_char,left_backup,right_backup;
+	if(tmp->data[left_index]==tmp->data[right_index]&&
+		(tmp->data[left_index]=='\''||tmp->data[left_index]=='\"'))
+			left_backup=right_backup=tmp->data[left_index];
+	else if(right_index-left_index>2&&tmp->data[left_index]=='\\'&&
+		tmp->data[right_index]=='\"'&&tmp->data[left_index+1]=='\"'&&
+		tmp->data[right_index-1]=='\\')
+	{
+		left_backup=tmp->data[++left_index];
+		right_backup=tmp->data[--right_index];
+	}
+	else
+	{
+		left_backup=tmp->data[--left_index];
+		right_backup=tmp->data[++right_index];
+	}
+	tmp->data[left_index]=tmp->data[right_index]='\"';
+	backup_char=tmp->data[right_index+1];
+	tmp->data[right_index+1]='\0';
+	tmp->data+=left_index;
+	int satisfy=0,i,ret_code=0;
+	if(!strcmp(tmp->data,"\"waitforexitandrun\""))
+	{
+		ret_code=1;
+		goto restore_data_and_return;
+	}
+	for(i=right_index-left_index+1;i--;)if(tmp->data[i]=='\\'||tmp->data[i]=='/')break;
+	if(i<0)i=0;
+	if(tmp->data[++i]=='w'&&tmp->data[i+1]=='i'&&tmp->data[i+2]=='n'&&tmp->data[i+3]=='e')
+		{i+=4;satisfy=1;}
+	else if(tmp->data[i]=='p'&&tmp->data[i+1]=='r'&&tmp->data[i+2]=='o'&&
+		tmp->data[i+3]=='t'&&tmp->data[i+4]=='o'&&tmp->data[i+5]=='n'){i+=6;satisfy=1;}
+	if(!satisfy)
+	{
+		//so mach types of linux shell!!!
+		if((tmp->data[i]=='b'&&tmp->data[i+1]=='a'&&
+			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
+			(tmp->data[i]=='f'&&tmp->data[i+1]=='i'&&
+			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
+			(tmp->data[i]=='t'&&tmp->data[i+1]=='c'&&
+			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
+			(tmp->data[i]=='d'&&tmp->data[i+1]=='a'&&
+			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h'))
+				{i+=4;satisfy=1;}
+		else if((tmp->data[i]=='c'||tmp->data[i]=='k'||tmp->data[i]=='z')&&
+			tmp->data[i+1]=='s'&&tmp->data[i+2]=='h'){i+=3;satisfy=1;}
+		else if(tmp->data[i]=='s'&&tmp->data[i+1]=='h'){i+=2;satisfy=1;}
+		if(satisfy&&tmp->data[i]=='\"')ret_code=4;
+		goto restore_data_and_return;
+	}
+	if((tmp->data[i]=='3'&&tmp->data[i+1]=='2')||
+		(tmp->data[i]=='6'&&tmp->data[i+1]=='4'))i+=2;
+	if(tmp->data[i]=='.'&&tmp->data[i+1]=='e'&&
+		tmp->data[i+2]=='x'&&tmp->data[i+3]=='e')i+=4;
+	if(tmp->data[i]=='\"')ret_code=2;
+	restore_data_and_return:;
+	tmp->data-=left_index;
+	tmp->data[left_index]=left_backup;
+	tmp->data[right_index]=right_backup;
+	tmp->data[right_index+1]=backup_char;
+	return ret_code;
+}
+dstr log_str,launch_command,extra_command;int arg_index,arg_index_inside_quotes;
 void convert_critical_argument_to_windows_format()
 {
 	append_string_to_dstr(&log_str,"\n===[Argument Converter]===",'\n',0);
-	if(launch_command.data[arg_index+1]!='.'&&launch_command.data[arg_index+1]!='/')
+	int i=0,converting=1,escape=0;char c=launch_command.data[arg_index],terminate_symbol=' ';
+	if(c=='\"'||c=='\''){terminate_symbol=c;i=1;}
+	else if(arg_index_inside_quotes&&c=='\\'&&
+		launch_command.data[arg_index+1]=='\"'){terminate_symbol='\"';i=2;}
+	if(launch_command.data[arg_index+i]!='.'&&launch_command.data[arg_index+i]!='/')
 	{
 		append_string_to_dstr(&log_str,"No need to convert game argument!",'\n',0);
-		return;
+		converting=0;
 	}
-	append_string_to_dstr(&log_str,"Converting game argument...",'\n',0);
-	dstr game_arg;int i=1;char c;
+	else append_string_to_dstr(&log_str,"Converting game argument...",'\n',0);
+	dstr game_arg;
 	game_arg.data=NULL;
 	game_arg.length=game_arg.alloc=0;
 	append_char_to_dstr(&game_arg,'\"',0);
-	if(launch_command.data[arg_index+1]=='.'&&launch_command.data[arg_index+2]=='/')i=3;
-	if(launch_command.data[arg_index+1]=='/')append_string_to_dstr(&game_arg,"Z",':',0);
-	while((c=launch_command.data[arg_index+i++])!='\"')
+	if(converting)
 	{
-		if(c=='/')append_char_to_dstr(&game_arg,'\\',1);
-		else append_char_to_dstr(&game_arg,c,0);
+		if(launch_command.data[arg_index+i]=='/')append_string_to_dstr(&game_arg,"Z",':',0);
+		if(launch_command.data[arg_index+i]=='.'&&
+			launch_command.data[arg_index+i+1]=='/')i+=2;
 	}
-	append_string_to_dstr(&game_arg,"\"",'\0',0);
-	append_string_to_dstr(&log_str,"New game argument:",' ',0);
-	append_string_to_dstr(&log_str,game_arg.data,'\n',0);
-	--game_arg.length;
-	while((c=launch_command.data[arg_index+i++])!='\0')append_char_to_dstr(&game_arg,c,0);
+	while((c=launch_command.data[arg_index+i++])!=terminate_symbol)
+	{
+		if(arg_index_inside_quotes&&!(escape&1)&&c=='\"')break;
+		if(c=='/'&&converting)append_char_to_dstr(&game_arg,'\\',1);
+		else append_char_to_dstr(&game_arg,c,0);
+		if(c=='\\')++escape;
+		else escape=0;
+	}
+	if(terminate_symbol==' ')--i;
+	if(arg_index_inside_quotes&&(escape&1)&&c=='\"')game_arg.data[game_arg.length-1]=c;
+	else append_char_to_dstr(&game_arg,'\"',0);
+	if(converting)
+	{
+		append_char_to_dstr(&game_arg,'\0',0);
+		append_string_to_dstr(&log_str,"New game argument:",' ',0);
+		append_string_to_dstr(&log_str,game_arg.data,'\n',0);
+		--game_arg.length;
+	}
+	for(;(c=launch_command.data[arg_index+i++])!='\0';)
+	{
+		if(arg_index_inside_quotes&&c=='\"')
+		{
+			if(escape&1)game_arg.data[game_arg.length-1]=c;
+			else break;
+		}
+		else if(arg_index_inside_quotes&&c=='\'')
+			append_char_to_dstr(&game_arg,'\"',0);
+		else append_char_to_dstr(&game_arg,c,0);
+		if(c=='\\')++escape;
+		else escape=0;
+	}
+	for(;c!='\0';c=launch_command.data[arg_index+i++])append_char_to_dstr(&extra_command,c,0);
+	if(extra_command.data)append_char_to_dstr(&extra_command,'\0',0);
 	append_char_to_dstr(&game_arg,'\0',0);
 	launch_command.length=arg_index;
 	append_string_to_dstr(&launch_command,game_arg.data,'\0',0);
@@ -57,9 +151,11 @@ void convert_critical_argument_to_windows_format()
 	append_string_to_dstr(&log_str,"Done converting game argument!",'\n',0);
 	return;
 }
+dstr *argvx;char buffer[128];
+int steam_index,argix,arglx,nested_shell_detected;
 void append_argument(char*value)
 {
-	dstr *tmp;int index,i,satisfy=0;
+	dstr *tmp;int index,i,left=launch_command.length,right,end,write_arg_index=0;char c;
 	sprintf(buffer,"Argument[%d]:",argix);
 	append_string_to_dstr(&log_str,buffer,' ',0);
 	if(arglx==argix)argvx=(dstr*)realloc(argvx,(arglx=arglx<<1|1)*sizeof(dstr));
@@ -71,34 +167,61 @@ void append_argument(char*value)
 	if(steam_index)
 	{
 		append_string_to_dstr(&launch_command,value,' ',1);
-		if(!strcmp(tmp->data,"\"waitforexitandrun\""))
+		if(!nested_shell_detected)
 		{
-			game_index=index;
-			arg_index=launch_command.length;
-			append_string_to_dstr(&log_str,"\n===[Game Argument]===",'\n',0);
+			i=check_for_wine_or_proton_keyword(tmp,0,tmp->length-2);
+			if(i&1)
+			{
+				arg_index=launch_command.length;
+				append_string_to_dstr(&log_str,"\n===[Game Argument]===",'\n',0);
+			}
+			if(i&2)
+			{
+				arg_index=launch_command.length;
+				append_string_to_dstr(&log_str,"^wine or proton arg above^",'\n',0);
+			}
+			if(i&4)
+			{
+				nested_shell_detected=1;
+				append_string_to_dstr(&log_str,"^bash shell fork above^",'\n',0);
+			}
 			return;
 		}
-		for(i=tmp->length;i--;)if(tmp->data[i]=='\\'||tmp->data[i]=='/')break;
-		if(i<0)i=0;
-		if(tmp->data[++i]=='p'&&tmp->data[i+1]=='r'&&tmp->data[i+2]=='o'&&
-			tmp->data[i+3]=='t'&&tmp->data[i+4]=='o'&&tmp->data[i+5]=='n'){i+=6;satisfy=1;}
-		if(tmp->data[i]=='w'&&tmp->data[i+1]=='i'&&tmp->data[i+2]=='n'&&tmp->data[i+3]=='e')
-			{i+=4;satisfy=1;}
-		if(!satisfy)return;
-		if((tmp->data[i]=='3'&&tmp->data[i+1]=='2')||
-			(tmp->data[i]=='6'&&tmp->data[i+1]=='4'))i+=2;
-		if(tmp->data[i]=='.'&&tmp->data[i+1]=='e'&&
-			tmp->data[i+2]=='x'&&tmp->data[i+3]=='e')i+=4;
-		if(tmp->data[i]=='\"')
+		for(end=launch_command.length-2;left<end;)
 		{
-			game_index=index;
-			arg_index=launch_command.length;
-			append_string_to_dstr(&log_str,"^wine or proton arg above^",'\n',0);
+			if(launch_command.data[++left]<=' ')continue;
+			if(write_arg_index){arg_index=left;write_arg_index=0;arg_index_inside_quotes=1;}
+			if(launch_command.data[left]=='\\'&&launch_command.data[left+1]=='\"')
+				{c='\"';right=left+1;}
+			else if(launch_command.data[left]=='\''){c='\'';right=left;}
+			else{c=' ';right=left;}
+			while(launch_command.data[++right]!=c)if(right>=end){right=end-1;break;}
+			if(launch_command.data[right]==' '&&c==' ')--right;
+			append_string_to_dstr(&log_str,"--> sub argument:",' ',0);
+			c=launch_command.data[right+1];
+			launch_command.data[right+1]='\0';
+			append_string_to_dstr(&log_str,launch_command.data+left,'\n',0);
+			launch_command.data[right+1]=c;
+			i=check_for_wine_or_proton_keyword(&launch_command,left,right);
+			if(i&1)
+			{
+				write_arg_index=1;
+				append_string_to_dstr(&log_str,"^proton magic keyword above^",'\n',0);
+			}
+			if(i&2)
+			{
+				write_arg_index=1;
+				append_string_to_dstr(&log_str,"^wine or proton arg above^",'\n',0);
+			}
+			if(i&4)append_string_to_dstr(&log_str,"[WARN] ^bash shell on bash shell^",'\n',0);
+			left=right+1;
 		}
+		if(write_arg_index)
+			append_string_to_dstr(&log_str,"[WARN] Unexpected end of string!",'\n',0);
 	}
 	else if(!strcmp(tmp->data,"\"--\""))
 	{
-		steam_index=game_index=index;
+		steam_index=index;
 		arg_index=launch_command.length;
 		append_string_to_dstr(&log_str,"\n===[Steam Argument]===",'\n',0);
 	}
@@ -112,6 +235,7 @@ void write_argument_to_file(FILE*f,int index)
 	argvx[index].data[argvx[index].length-2]='\"';
 	return;
 }
+int injector_path_index;dstr injector_path;
 void init_injector_path()
 {
 	int i,j;
@@ -285,14 +409,28 @@ int main(int argc,char**argv)
 		else{fputc('%',ff);i=j;}
 	}
 	fclose(f);
-	launch_command.data[--launch_command.length]='\0';
+	if(launch_command.data!=NULL)launch_command.data[--launch_command.length]='\0';
+	else
+	{
+		append_string_to_dstr(&launch_command,"\"",'\"',0);
+		append_string_to_dstr(&log_str,"[WARN] launch command is empty! Make sure",' ',0);
+		append_string_to_dstr(&log_str,"you have put \"--\" before %command%!",'\n',0);
+	}
 	convert_critical_argument_to_windows_format();
 	fprintf(ff,"\nstart \"\" %s\n",launch_command.data+arg_index);
 	fclose(ff);
 	//injecting launcher.bat to launch command
 	launch_command.length=arg_index;
 	create_full_file_injector_path("launcher.bat");
+	if(arg_index_inside_quotes)
+		injector_path.data[injector_path.length-2]=injector_path.data[0]='\'';
 	append_string_to_dstr(&launch_command,injector_path.data,'\0',0);
+	if(extra_command.data)
+	{
+		--launch_command.length;
+		append_string_to_dstr(&launch_command,extra_command.data,'\0',0);
+		free(extra_command.data);
+	}
 	append_string_to_dstr(&log_str,"\n===[Launch Command]===",'\n',0);
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
 	/* writing all logs into file..
@@ -310,10 +448,7 @@ int main(int argc,char**argv)
 	}
 	if(injector_path.data)free(injector_path.data);
 	if(log_str.data)free(log_str.data);
-	if(launch_command.data)
-	{
-		ret=system(launch_command.data);
-		free(launch_command.data);
-	}
+	ret=system(launch_command.data);
+	free(launch_command.data);
 	return ret;
 }
