@@ -1,13 +1,18 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
+#define CMD_INJECT_VERSION "v0.1.1"
 typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
 void append_char_to_dstr(dstr *str,char c,int escape_special)
 {
 	if(str->length==str->alloc)
 		str->data=(char*)realloc(str->data,(str->alloc=str->alloc<<1|1)*sizeof(char));
-	if((c=='\"'||c=='\\')&&escape_special)append_char_to_dstr(str,'\\',0);
 	str->data[str->length++]=c;
+	if((c=='\"'||c=='\\')&&escape_special)
+	{
+		str->data[str->length-1]='\\';
+		append_char_to_dstr(str,c,0);
+	}
 	return;
 }
 void append_string_to_dstr(dstr*str,char *string,char end_symbol,int write_quotes)
@@ -20,7 +25,7 @@ void append_string_to_dstr(dstr*str,char *string,char end_symbol,int write_quote
 }
 dstr *argvx,log_str,launch_command,injector_path;char buffer[128];
 int steam_index,game_index,arg_index,argix,arglx,injector_path_index;
-void convert_critical_argument_to_windows_path()
+void convert_critical_argument_to_windows_format()
 {
 	append_string_to_dstr(&log_str,"\n===[Argument Converter]===",'\n',0);
 	if(launch_command.data[arg_index+1]!='.'&&launch_command.data[arg_index+1]!='/')
@@ -165,6 +170,7 @@ void load_injector_list(FILE *f,char*config_name)
 	{
 		append_string_to_dstr(&log_str,"Config file not found, generating new one!",'\n',0);
 		ff=open_file_on_injector_path(config_name,"w");
+		fprintf(ff,"#cmd inject version: %s\n",CMD_INJECT_VERSION);
 		fprintf(ff,"#note: you can list your custom injector here to be auto detected\n");
 		fprintf(ff,"#format: \"<injector exe>\" <arg_idx_a> <arg_idx_b> ... <arg_idx_n>\n");
 		fprintf(ff,"#arg_idx: is a number between \'1\' and \'9\' inclusive\n");
@@ -225,27 +231,36 @@ void load_injector_list(FILE *f,char*config_name)
 	if(exe.data)free(exe.data);
 	return;
 }
+FILE* generate_bat_config(char*bat_filename)
+{
+	FILE *f;
+	f=open_file_on_injector_path(bat_filename,"w");
+	fprintf(f,"rem ove this line to make this config permanent! ");
+	fprintf(f,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
+	fprintf(f,"pushd %%~dp0\n");
+	fprintf(f,"rem ember to put your injetor and its arguments between pushd and popd\n");
+	load_injector_list(f,"injecttor_list.conf");
+	fprintf(f,"popd");
+	fclose(f);
+	return open_file_on_injector_path("config.bat","r");
+}
 int main(int argc,char**argv)
 {
+	//receiving argumnents parameter and initializing the program
 	int i,j,ret=-1;FILE *f,*ff;
-	append_string_to_dstr(&log_str,"===[Injector Argument]===",'\n',0);
+	sprintf(buffer,"cmd_inject version: %s",CMD_INJECT_VERSION);
+	append_string_to_dstr(&log_str,buffer,'\n',0);
+	append_string_to_dstr(&log_str,"\n===[Injector Argument]===",'\n',0);
 	for(i=-1;++i<argc;)append_argument(argv[i]);
 	init_injector_path();
+	//creating or parsing "config.bat"
 	f=open_file_on_injector_path("config.bat","r");
 	if(f==NULL)
 	{
 		append_string_to_dstr(&log_str,"\n===[Config Bat Log]===",'\n',0);
-		reset_bat_config:;//automatically generate config.bat
-		f=open_file_on_injector_path("config.bat","w");
-		fprintf(f,"rem ove this line to make this config permanent!\n");
-		fprintf(f,"pushd %%~dp0\n");
-		fprintf(f,"rem ember to put your injetor and its arguments between pushd and popd\n");
-		load_injector_list(f,"injecttor_list.conf");
-		fprintf(f,"popd");
-		fclose(f);i=0;
-		f=open_file_on_injector_path("config.bat","r");
+		f=generate_bat_config("config.bat");
 	}
-	if(i==argc)//check if config.bat is not generated in this session
+	else
 	{
 		j=fscanf(f,"%8c",buffer);buffer[8]='\0';
 		if(!strcmp(buffer,"rem ove "))
@@ -253,10 +268,10 @@ int main(int argc,char**argv)
 			append_string_to_dstr(&log_str,"\n===[Config Bat Log]===",'\n',0);
 			append_string_to_dstr(&log_str,"Overwriting \"config.bat\" file!",'\n',0);
 			fclose(f);
-			goto reset_bat_config;
+			f=generate_bat_config("config.bat");
 		}
-		//printf("NOTE: \"%s\" not exual to \nNOTE: \"rem ove \"! check the code\n",buffer);
 	}
+	//generating "launcher.bat"
 	ff=open_file_on_injector_path("launcher.bat","w");
 	for(fseek(f,0,SEEK_SET);(i=fgetc(f))!=EOF;fputc(i,ff))if('%'==(char)i)
 	{
@@ -271,17 +286,23 @@ int main(int argc,char**argv)
 	}
 	fclose(f);
 	launch_command.data[--launch_command.length]='\0';
-	convert_critical_argument_to_windows_path();
+	convert_critical_argument_to_windows_format();
 	fprintf(ff,"\nstart \"\" %s\n",launch_command.data+arg_index);
 	fclose(ff);
+	//injecting launcher.bat to launch command
 	launch_command.length=arg_index;
 	create_full_file_injector_path("launcher.bat");
 	append_string_to_dstr(&launch_command,injector_path.data,'\0',0);
 	append_string_to_dstr(&log_str,"\n===[Launch Command]===",'\n',0);
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
+	/* writing all logs into file..
+	 * TODO: the logs will not be writen to disk if the program crashed before reaching
+	 *       this section, will fix this in future version!
+	 */
 	f=open_file_on_injector_path("cmd_inject.log","w");
 	fprintf(f,"%s",log_str.data);
 	fclose(f);
+	//cleaning up, freeing memory, and launching injected launch command
 	if(argvx)
 	{
 		for(i=-1;++i<argix;)if(argvx[i].data)free(argvx[i].data);
