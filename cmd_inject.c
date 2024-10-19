@@ -115,7 +115,7 @@ void write_argument_to_file(FILE*f,int index)
 void init_injector_path()
 {
 	int i,j;
-	for(j=argvx[0].length-1;j-->0;)
+	for(j=argvx[0].length-1;j--;)
 		if((argvx[0].data[j]=='\\'&&argvx[0].data[j+1]!='\"')||argvx[0].data[j]=='/')
 			break;
 	for(i=-1;i++<j;)append_char_to_dstr(&injector_path,argvx[0].data[i],0);
