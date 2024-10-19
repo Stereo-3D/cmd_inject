@@ -242,7 +242,7 @@ FILE* generate_bat_config(char*bat_filename)
 	load_injector_list(f,"injecttor_list.conf");
 	fprintf(f,"popd");
 	fclose(f);
-	return open_file_on_injector_path("config.bat","r");
+	return open_file_on_injector_path(bat_filename,"r");
 }
 int main(int argc,char**argv)
 {
