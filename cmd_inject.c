@@ -1,17 +1,52 @@
 #include<stdio.h>
 #include<stdlib.h>
-#include<string.h>
-#define CMD_INJECT_VERSION "v0.2.0"
+#define CMD_INJECT_VERSION "v0.2.1"
 typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
+int is_both_string_equal(char*a,char*b)//with this, no need to include string.h anymore!
+{
+	for(;*a!='\0'&&*b!='\0';)if(*a++!=*b++)return 0;
+	return *a==*b;
+}
+dstr log_str;FILE *log_file;char *argv0;
 void append_char_to_dstr(dstr *str,char c,int escape_special)
 {
+	if(str==&log_str&&log_file==NULL)
+	{
+		//because log file is an emergency it need to be prioritized! (have own safe code)
+		int i,j;char *log_file_path;for(i=-1;argv0[++i];);
+		log_file_path=(char*)calloc(i+128,sizeof(char));
+		while(i--)if(argv0[i]=='\\'||argv0[i]=='/')break;
+		for(j=i+1,i=-1;++i<j;)log_file_path[i]=argv0[i];
+		sprintf(log_file_path+i,"cmd_inject.log");
+		log_file=fopen(log_file_path,"w");
+		if(log_file==NULL)
+		{
+			printf("[ERROR] cannot write to log file: \"%s\"! ",log_file_path);
+			printf("Make sure you have write permission on that folder and make ");
+			printf("sure you have enough disk space to write the file to the disk!\n");
+			fflush(stdout);
+		}
+		free(log_file_path);log_file_path=NULL;
+	}
 	if(str->length==str->alloc)
 		str->data=(char*)realloc(str->data,(str->alloc=str->alloc<<1|1)*sizeof(char));
-	str->data[str->length++]=c;
 	if((c=='\"'||c=='\\')&&escape_special)
 	{
-		str->data[str->length-1]='\\';
+		str->data[str->length++]='\\';
+		if(str==&log_str)fputc('\\',log_file);
 		append_char_to_dstr(str,c,0);
+		return;
+	}
+	str->data[str->length++]=c;
+	if(str==&log_str)
+	{
+		if(c!='\0')fputc(c,log_file);
+		if(c=='\n')fflush(log_file);//force to write the log data to disk (clear cache)
+		/* the above operation is slow (especially on non ssd drive)
+		 * but this is necessary to capture all moments while the program alive
+		 * to ensure the log data is saved to disk properly in case of program crash at random
+		 */
+		if(c=='\0'){fclose(log_file);log_file=NULL;}
 	}
 	return;
 }
@@ -46,7 +81,7 @@ int check_for_wine_or_proton_keyword(dstr*tmp,int left_index,int right_index)
 	tmp->data[right_index+1]='\0';
 	tmp->data+=left_index;
 	int satisfy=0,i,ret_code=0;
-	if(!strcmp(tmp->data,"\"waitforexitandrun\""))
+	if(is_both_string_equal(tmp->data,"\"waitforexitandrun\""))
 	{
 		ret_code=1;
 		goto restore_data_and_return;
@@ -87,7 +122,7 @@ int check_for_wine_or_proton_keyword(dstr*tmp,int left_index,int right_index)
 	tmp->data[right_index+1]=backup_char;
 	return ret_code;
 }
-dstr log_str,launch_command,extra_command;int arg_index,arg_index_inside_quotes;
+dstr launch_command,extra_command;int arg_index,arg_index_inside_quotes;
 void convert_critical_argument_to_windows_format()
 {
 	append_string_to_dstr(&log_str,"\n===[Argument Converter]===",'\n',0);
@@ -219,7 +254,7 @@ void append_argument(char*value)
 		if(write_arg_index)
 			append_string_to_dstr(&log_str,"[WARN] Unexpected end of string!",'\n',0);
 	}
-	else if(!strcmp(tmp->data,"\"--\""))
+	else if(is_both_string_equal(tmp->data,"\"--\""))
 	{
 		steam_index=index;
 		arg_index=launch_command.length;
@@ -238,12 +273,19 @@ void write_argument_to_file(FILE*f,int index)
 int injector_path_index;dstr injector_path;
 void init_injector_path()
 {
+	append_string_to_dstr(&log_str,"\n===[injector path]===",'\n',0);
+	append_string_to_dstr(&log_str,"Detecting injector path...",'\n',0);
 	int i,j;
 	for(j=argvx[0].length-1;j--;)
 		if((argvx[0].data[j]=='\\'&&argvx[0].data[j+1]!='\"')||argvx[0].data[j]=='/')
 			break;
 	for(i=-1;i++<j;)append_char_to_dstr(&injector_path,argvx[0].data[i],0);
+	if(!injector_path.data)append_char_to_dstr(&injector_path,'\"',0);
 	injector_path_index=injector_path.length;
+	append_char_to_dstr(&injector_path,'\0',0);
+	append_string_to_dstr(&log_str,"injector folder location:",' ',0);
+	append_string_to_dstr(&log_str,injector_path.data,'\"',0);
+	append_string_to_dstr(&log_str,"!",'\n',0);
 	return;
 }
 void create_full_file_injector_path(char *filename)
@@ -261,6 +303,14 @@ FILE* open_file_on_injector_path(char *filename,char *mode)
 	injector_path.data[injector_path.length-2]='\0';
 	f=fopen(injector_path.data+1,mode);
 	injector_path.data[injector_path.length-2]='\"';
+	if(f==NULL&&*mode!='r')
+	{
+		append_string_to_dstr(&log_str,"[ERROR] Cannot write to",' ',0);
+		append_string_to_dstr(&log_str,injector_path.data,'!',0);
+		append_string_to_dstr(&log_str," Make sure you have write permission on",' ',0);
+		append_string_to_dstr(&log_str,"that folder and make sure you have enough",' ',0);
+		append_string_to_dstr(&log_str,"disk space to write the file to the disk!",'\n',0);
+	}
 	return f;
 }
 void check_an_injector(FILE *f,char *injector_name,dstr *arg)
@@ -274,8 +324,8 @@ void check_an_injector(FILE *f,char *injector_name,dstr *arg)
 		for(i=-1;++i<arg->length;)fprintf(f," \"%%%c\"",arg->data[i]);
 		fprintf(f,"\n");
 		append_string_to_dstr(&log_str,"found",' ',0);
-		append_string_to_dstr(&log_str,injector_name,'!',1);
-		append_char_to_dstr(&log_str,'\n',0);
+		append_string_to_dstr(&log_str,injector_name,' ',1);
+		append_string_to_dstr(&log_str,"on injector path!",'\n',0);
 	}
 	else
 	{
@@ -371,7 +421,7 @@ FILE* generate_bat_config(char*bat_filename)
 int main(int argc,char**argv)
 {
 	//receiving argumnents parameter and initializing the program
-	int i,j,ret=-1;FILE *f,*ff;
+	int i,j,ret=-1;FILE *f,*ff;argv0=argv[0];
 	sprintf(buffer,"cmd_inject version: %s",CMD_INJECT_VERSION);
 	append_string_to_dstr(&log_str,buffer,'\n',0);
 	append_string_to_dstr(&log_str,"\n===[Injector Argument]===",'\n',0);
@@ -387,7 +437,7 @@ int main(int argc,char**argv)
 	else
 	{
 		j=fscanf(f,"%8c",buffer);buffer[8]='\0';
-		if(!strcmp(buffer,"rem ove "))
+		if(is_both_string_equal(buffer,"rem ove "))
 		{
 			append_string_to_dstr(&log_str,"\n===[Config Bat Log]===",'\n',0);
 			append_string_to_dstr(&log_str,"Overwriting \"config.bat\" file!",'\n',0);
@@ -433,13 +483,6 @@ int main(int argc,char**argv)
 	}
 	append_string_to_dstr(&log_str,"\n===[Launch Command]===",'\n',0);
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
-	/* writing all logs into file..
-	 * TODO: the logs will not be writen to disk if the program crashed before reaching
-	 *       this section, will fix this in future version!
-	 */
-	f=open_file_on_injector_path("cmd_inject.log","w");
-	fprintf(f,"%s",log_str.data);
-	fclose(f);
 	//cleaning up, freeing memory, and launching injected launch command
 	if(argvx)
 	{
