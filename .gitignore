@@ -55,5 +55,6 @@ dkms.conf
 *.log
 *.bat
 *.conf
+*.kate-swp
 cmd_inject_linux32
 cmd_inject_linux64
