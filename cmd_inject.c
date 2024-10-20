@@ -1,11 +1,78 @@
 #include<stdio.h>
 #include<stdlib.h>
 #define CMD_INJECT_VERSION "v0.2.1"
-typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
-int is_both_string_equal(char*a,char*b)//with this, no need to include string.h anymore!
+int is_both_string_equal(char*a,char*b)
 {
 	for(;*a!='\0'&&*b!='\0';)if(*a++!=*b++)return 0;
 	return *a==*b;
+}
+typedef struct Dynamic_String{char *data;int length,alloc;}dstr;
+int check_if_str_is_prefix_of_dstr(dstr *str,int str_index,char *keyword)
+{
+	while(*keyword!='\0')
+		if(str_index>=str->length||str->data[str_index++]!=*keyword++)return 0;
+	return*keyword=='\0';
+}
+int check_for_special_program_keyword(dstr*str,int left_index,int right_index)
+{
+	//convert the format
+	char backup_char,left_backup,right_backup;
+	if(str->data[left_index]==str->data[right_index]&&
+		(str->data[left_index]=='\''||str->data[left_index]=='\"'))
+			left_backup=right_backup=str->data[left_index];
+	else if(right_index-left_index>2&&
+		check_if_str_is_prefix_of_dstr(str,left_index,"\\\"")&&
+		check_if_str_is_prefix_of_dstr(str,right_index-1,"\\\""))
+	{
+		left_backup=str->data[++left_index];
+		right_backup=str->data[--right_index];
+	}
+	else
+	{
+		left_backup=str->data[--left_index];
+		right_backup=str->data[++right_index];
+	}
+	str->data[left_index]=str->data[right_index]='\"';
+	backup_char=str->data[right_index+1];
+	str->data[right_index+1]='\0';
+	str->data+=left_index;
+	int satisfy=0,i,ret_code=0;
+	if(is_both_string_equal(str->data,"\"waitforexitandrun\""))
+	{
+		ret_code=1;//proton's magic keyword detected
+		goto restore_data_and_return;
+	}
+	for(i=right_index-left_index+1;i--;)if(str->data[i]=='\\'||str->data[i]=='/')break;
+	if(i<0)i=0;
+	if(check_if_str_is_prefix_of_dstr(str,++i,"proton")){i+=6;satisfy=1;}//proton_binary
+	else if(check_if_str_is_prefix_of_dstr(str,i,"wine")){i+=4;satisfy=1;}//wine binary
+	if(!satisfy)
+	{
+		//linux shell binary (so many of them)! this list may not a complete list
+		if(check_if_str_is_prefix_of_dstr(str,i,"bash")||
+			check_if_str_is_prefix_of_dstr(str,i,"fish")||
+			check_if_str_is_prefix_of_dstr(str,i,"tcsh")||
+			check_if_str_is_prefix_of_dstr(str,i,"dash")){i+=4;satisfy=1;}
+		else if(check_if_str_is_prefix_of_dstr(str,i,"csh")||
+			check_if_str_is_prefix_of_dstr(str,i,"ksh")||
+			check_if_str_is_prefix_of_dstr(str,i,"zsh")){i+=3;satisfy=1;}
+		else if(check_if_str_is_prefix_of_dstr(str,i,"sh")){i+=2;satisfy=1;}
+		if(satisfy&&str->data[i]=='\"')ret_code=4;//linux shell detected
+		goto restore_data_and_return;
+	}
+	//suffix like 32 and 64 is also allowed
+	if(check_if_str_is_prefix_of_dstr(str,i,"32")||
+		check_if_str_is_prefix_of_dstr(str,i,"64"))i+=2;
+	//in case if there is wine or proton exe version (unlikely)
+	if(check_if_str_is_prefix_of_dstr(str,i,".exe"))i+=4;
+	if(str->data[i]=='\"')ret_code=2;//wine/proton detected
+	//restore the format
+	restore_data_and_return:;
+	str->data-=left_index;
+	str->data[left_index]=left_backup;
+	str->data[right_index]=right_backup;
+	str->data[right_index+1]=backup_char;
+	return ret_code;
 }
 dstr log_str;FILE *log_file;char *argv0;
 void append_char_to_dstr(dstr *str,char c,int escape_special)
@@ -26,7 +93,7 @@ void append_char_to_dstr(dstr *str,char c,int escape_special)
 			printf("sure you have enough disk space to write the file to the disk!\n");
 			fflush(stdout);
 		}
-		free(log_file_path);log_file_path=NULL;
+		free(log_file_path);
 	}
 	if(str->length==str->alloc)
 		str->data=(char*)realloc(str->data,(str->alloc=str->alloc<<1|1)*sizeof(char));
@@ -58,70 +125,6 @@ void append_string_to_dstr(dstr*str,char *string,char end_symbol,int write_quote
 	append_char_to_dstr(str,end_symbol,0);
 	return;
 }
-int check_for_wine_or_proton_keyword(dstr*tmp,int left_index,int right_index)
-{
-	char backup_char,left_backup,right_backup;
-	if(tmp->data[left_index]==tmp->data[right_index]&&
-		(tmp->data[left_index]=='\''||tmp->data[left_index]=='\"'))
-			left_backup=right_backup=tmp->data[left_index];
-	else if(right_index-left_index>2&&tmp->data[left_index]=='\\'&&
-		tmp->data[right_index]=='\"'&&tmp->data[left_index+1]=='\"'&&
-		tmp->data[right_index-1]=='\\')
-	{
-		left_backup=tmp->data[++left_index];
-		right_backup=tmp->data[--right_index];
-	}
-	else
-	{
-		left_backup=tmp->data[--left_index];
-		right_backup=tmp->data[++right_index];
-	}
-	tmp->data[left_index]=tmp->data[right_index]='\"';
-	backup_char=tmp->data[right_index+1];
-	tmp->data[right_index+1]='\0';
-	tmp->data+=left_index;
-	int satisfy=0,i,ret_code=0;
-	if(is_both_string_equal(tmp->data,"\"waitforexitandrun\""))
-	{
-		ret_code=1;
-		goto restore_data_and_return;
-	}
-	for(i=right_index-left_index+1;i--;)if(tmp->data[i]=='\\'||tmp->data[i]=='/')break;
-	if(i<0)i=0;
-	if(tmp->data[++i]=='w'&&tmp->data[i+1]=='i'&&tmp->data[i+2]=='n'&&tmp->data[i+3]=='e')
-		{i+=4;satisfy=1;}
-	else if(tmp->data[i]=='p'&&tmp->data[i+1]=='r'&&tmp->data[i+2]=='o'&&
-		tmp->data[i+3]=='t'&&tmp->data[i+4]=='o'&&tmp->data[i+5]=='n'){i+=6;satisfy=1;}
-	if(!satisfy)
-	{
-		//so mach types of linux shell!!!
-		if((tmp->data[i]=='b'&&tmp->data[i+1]=='a'&&
-			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
-			(tmp->data[i]=='f'&&tmp->data[i+1]=='i'&&
-			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
-			(tmp->data[i]=='t'&&tmp->data[i+1]=='c'&&
-			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h')||
-			(tmp->data[i]=='d'&&tmp->data[i+1]=='a'&&
-			tmp->data[i+2]=='s'&&tmp->data[i+3]=='h'))
-				{i+=4;satisfy=1;}
-		else if((tmp->data[i]=='c'||tmp->data[i]=='k'||tmp->data[i]=='z')&&
-			tmp->data[i+1]=='s'&&tmp->data[i+2]=='h'){i+=3;satisfy=1;}
-		else if(tmp->data[i]=='s'&&tmp->data[i+1]=='h'){i+=2;satisfy=1;}
-		if(satisfy&&tmp->data[i]=='\"')ret_code=4;
-		goto restore_data_and_return;
-	}
-	if((tmp->data[i]=='3'&&tmp->data[i+1]=='2')||
-		(tmp->data[i]=='6'&&tmp->data[i+1]=='4'))i+=2;
-	if(tmp->data[i]=='.'&&tmp->data[i+1]=='e'&&
-		tmp->data[i+2]=='x'&&tmp->data[i+3]=='e')i+=4;
-	if(tmp->data[i]=='\"')ret_code=2;
-	restore_data_and_return:;
-	tmp->data-=left_index;
-	tmp->data[left_index]=left_backup;
-	tmp->data[right_index]=right_backup;
-	tmp->data[right_index+1]=backup_char;
-	return ret_code;
-}
 dstr launch_command,extra_command;int arg_index,arg_index_inside_quotes;
 void convert_critical_argument_to_windows_format()
 {
@@ -143,8 +146,7 @@ void convert_critical_argument_to_windows_format()
 	if(converting)
 	{
 		if(launch_command.data[arg_index+i]=='/')append_string_to_dstr(&game_arg,"Z",':',0);
-		if(launch_command.data[arg_index+i]=='.'&&
-			launch_command.data[arg_index+i+1]=='/')i+=2;
+		if(check_if_str_is_prefix_of_dstr(&launch_command,arg_index+i,"./"))i+=2;
 	}
 	while((c=launch_command.data[arg_index+i++])!=terminate_symbol)
 	{
@@ -190,21 +192,21 @@ dstr *argvx;char buffer[128];
 int steam_index,argix,arglx,nested_shell_detected;
 void append_argument(char*value)
 {
-	dstr *tmp;int index,i,left=launch_command.length,right,end,write_arg_index=0;char c;
+	dstr *str;int index,i,left=launch_command.length,right,end,write_arg_index=0;char c;
 	sprintf(buffer,"Argument[%d]:",argix);
 	append_string_to_dstr(&log_str,buffer,' ',0);
 	if(arglx==argix)argvx=(dstr*)realloc(argvx,(arglx=arglx<<1|1)*sizeof(dstr));
-	tmp=&argvx[index=argix++];
-	tmp->data=NULL;
-	tmp->length=tmp->alloc=0;
-	append_string_to_dstr(tmp,value,'\0',1);
+	str=&argvx[index=argix++];
+	str->data=NULL;
+	str->length=str->alloc=0;
+	append_string_to_dstr(str,value,'\0',1);
 	append_string_to_dstr(&log_str,value,'\n',1);
 	if(steam_index)
 	{
 		append_string_to_dstr(&launch_command,value,' ',1);
 		if(!nested_shell_detected)
 		{
-			i=check_for_wine_or_proton_keyword(tmp,0,tmp->length-2);
+			i=check_for_special_program_keyword(str,0,str->length-2);
 			if(i&1)
 			{
 				arg_index=launch_command.length;
@@ -226,7 +228,7 @@ void append_argument(char*value)
 		{
 			if(launch_command.data[++left]<=' ')continue;
 			if(write_arg_index){arg_index=left;write_arg_index=0;arg_index_inside_quotes=1;}
-			if(launch_command.data[left]=='\\'&&launch_command.data[left+1]=='\"')
+			if(check_if_str_is_prefix_of_dstr(&launch_command,left,"\\\""))
 				{c='\"';right=left+1;}
 			else if(launch_command.data[left]=='\''){c='\'';right=left;}
 			else{c=' ';right=left;}
@@ -237,7 +239,7 @@ void append_argument(char*value)
 			launch_command.data[right+1]='\0';
 			append_string_to_dstr(&log_str,launch_command.data+left,'\n',0);
 			launch_command.data[right+1]=c;
-			i=check_for_wine_or_proton_keyword(&launch_command,left,right);
+			i=check_for_special_program_keyword(&launch_command,left,right);
 			if(i&1)
 			{
 				write_arg_index=1;
@@ -254,7 +256,7 @@ void append_argument(char*value)
 		if(write_arg_index)
 			append_string_to_dstr(&log_str,"[WARN] Unexpected end of string!",'\n',0);
 	}
-	else if(is_both_string_equal(tmp->data,"\"--\""))
+	else if(is_both_string_equal(str->data,"\"--\""))
 	{
 		steam_index=index;
 		arg_index=launch_command.length;
