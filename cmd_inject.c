@@ -1,7 +1,32 @@
+/* cmd_inject: Command injector for both Steam Windows and Steam Linux
+ *             plus some other launcher with editable launch command
+ * Original project on Github: https://github.com/Stereo-3D/cmd_inject
+ * Copyleft 🄯 2024 Tjandra Satria Gunawan (discord: tjandra, email: tjandra@yandex.com)
+ * License: GNU GENERAL PUBLIC LICENSE
+ *          Version 3, 29 June 2007
+ *          https://www.gnu.org/licenses/gpl-3.0.en.html
+ * Non complete list of term inside GPL v3 ^for more info visit the link above^:
+ *   Permissions:
+ *     - Anyone can copy, modify and distribute this software.
+ *     - You can use this software privately.
+ *     - You can use this software for commercial purposes.
+ *   Conditions:
+ *     - License and copyright notice: You have to include the license and copyright notice
+ *                                     with each and every distribution.
+ *     - State changes: If you modify it, you have to indicate changes made to the code.
+ *     - Same license: Any modifications of this code base MUST be distributed
+ *                     with the same license, GPLv3.
+ *     - Disclose source: Source code must be made available
+ *                        when the licensed material is distributed.
+ *   Limitations:
+ *     - Warranty: This software is provided without warranty.
+ *     - Liability: The software author or license can not be held liable for
+ *                  any damages inflicted by the software.
+ */
 #include<stdio.h>
 #include<stdlib.h>
-#define CMD_INJECT_VERSION "v0.2.2"
-int is_both_string_equal(char*a,char*b)
+#define CMD_INJECT_VERSION "v0.2.3"
+int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
 {
 	for(;*a!='\0'&&*b!='\0';)if(*a++!=*b++)return 0;
 	return*a==*b;
@@ -79,7 +104,7 @@ int check_for_special_program_keyword(dstr*str,int left_index,int right_index)
 	return ret_code;
 }
 dstr log_str;FILE*log_file;char*argv0;
-void append_char_to_dstr(dstr*str,char c,int escape_special)
+void append_char_to_dstr(dstr*str,char c,int escape_special)//and log file IO management
 {
 	if(str==&log_str&&log_file==NULL)
 	{
@@ -130,10 +155,12 @@ void append_string_to_dstr(dstr*str,char*string,char end_symbol,int write_quotes
 	return;
 }
 dstr launch_command,extra_command;int arg_index,arg_index_inside_quotes;
-void convert_critical_argument_to_windows_format()
+void convert_critical_argument_to_windows_format()//and copy arguments to corresponding var
 {
+	//Initializing the converter
 	append_string_to_dstr(&log_str,"\n===[Argument Converter]===",'\n',0);
-	int i=0,converting=1,escape=0;char c=launch_command.data[arg_index],terminate_symbol=' ';
+	char c=launch_command.data[arg_index],terminate_symbol=' ';
+	int i=0,j,converting=1,escape=0;
 	if(c=='\"'||c=='\''){terminate_symbol=c;i=1;}
 	else if(arg_index_inside_quotes&&c=='\\'&&
 		launch_command.data[arg_index+1]=='\"'){terminate_symbol='\"';i=2;}
@@ -146,21 +173,28 @@ void convert_critical_argument_to_windows_format()
 	dstr game_arg;
 	game_arg.data=NULL;
 	game_arg.length=game_arg.alloc=0;
+	//copying main game argument (and converting it to windows format if required)
 	append_char_to_dstr(&game_arg,'\"',0);
 	if(converting)
 	{
 		if(launch_command.data[arg_index+i]=='/')append_string_to_dstr(&game_arg,"Z",':',0);
 		if(check_if_str_is_prefix_of_dstr(&launch_command,arg_index+i,"./"))i+=2;
 	}
+	append_string_to_dstr(&log_str,"Current game argument:",' ',0);
+	for(j=-1;++j<i;)append_char_to_dstr(&log_str,launch_command.data[arg_index+j],0);
 	while((c=launch_command.data[arg_index+i++])!=terminate_symbol)
 	{
 		if(arg_index_inside_quotes&&!(escape&1)&&c=='\"')break;
+		append_char_to_dstr(&log_str,c,0);
 		if(c=='/'&&converting)append_char_to_dstr(&game_arg,'\\',1);
 		else append_char_to_dstr(&game_arg,c,0);
 		if(c=='\\')++escape;
 		else escape=0;
 	}
+	//finalizing the data for main game argument
 	if(terminate_symbol==' ')--i;
+	append_char_to_dstr(&log_str,terminate_symbol,0);
+	append_char_to_dstr(&log_str,'\n',0);
 	if(arg_index_inside_quotes&&(escape&1)&&c=='\"')game_arg.data[game_arg.length-1]=c;
 	else append_char_to_dstr(&game_arg,'\"',0);
 	if(converting)
@@ -170,6 +204,7 @@ void convert_critical_argument_to_windows_format()
 		append_string_to_dstr(&log_str,game_arg.data,'\n',0);
 		--game_arg.length;
 	}
+	//copy the remaining argument for game argument
 	for(;(c=launch_command.data[arg_index+i++])!='\0';)
 	{
 		if(arg_index_inside_quotes&&c=='\"')
@@ -183,8 +218,10 @@ void convert_critical_argument_to_windows_format()
 		if(c=='\\')++escape;
 		else escape=0;
 	}
+	//copy the remaining argument outside of linux shell if exist
 	for(;c!='\0';c=launch_command.data[arg_index+i++])append_char_to_dstr(&extra_command,c,0);
-	if(extra_command.data)append_char_to_dstr(&extra_command,'\0',0);
+	//finalizing the data for remaining variables
+	append_char_to_dstr(&extra_command,'\0',0);
 	append_char_to_dstr(&game_arg,'\0',0);
 	launch_command.length=arg_index;
 	append_string_to_dstr(&launch_command,game_arg.data,'\0',0);
@@ -194,7 +231,7 @@ void convert_critical_argument_to_windows_format()
 }
 dstr*argvx;char buffer[128];
 int steam_index,argix,arglx,nested_shell_detected;
-void append_argument(char*value)
+void append_argument(char*value)//also parse and identify each arguments on the fly
 {
 	dstr*str;int index,i,left=launch_command.length,right,end,write_arg_index=0;char c;
 	sprintf(buffer,"Argument[%d]:",argix);
@@ -205,62 +242,67 @@ void append_argument(char*value)
 	str->length=str->alloc=0;
 	append_string_to_dstr(str,value,'\0',1);
 	append_string_to_dstr(&log_str,value,'\n',1);
-	if(steam_index)
+	if(steam_index)//the remaining command after "--"
 	{
 		append_string_to_dstr(&launch_command,value,' ',1);
-		if(!nested_shell_detected)
+		if(!nested_shell_detected)//not inside child linux shell
 		{
+			//do the argument check
 			i=check_for_special_program_keyword(str,0,str->length-2);
-			if(i&1)
+			if(i&1)//proton magic keyword detected
 			{
 				arg_index=launch_command.length;
 				append_string_to_dstr(&log_str,"\n===[Game Argument]===",'\n',0);
 			}
-			if(i&2)
+			if(i&2)//wine or proton executable detected
 			{
 				arg_index=launch_command.length;
 				append_string_to_dstr(&log_str,"^wine or proton arg above^",'\n',0);
 			}
-			if(i&4)
+			if(i&4)//linux shell detected
 			{
 				nested_shell_detected=1;
 				append_string_to_dstr(&log_str,"^bash shell fork above^",'\n',0);
 			}
 			return;
 		}
-		for(end=launch_command.length-2;left<end;)
+		for(end=launch_command.length-2;left<end;)//scan the nested command (for linux shell)
 		{
 			if(launch_command.data[++left]<=' ')continue;
 			if(write_arg_index){arg_index=left;write_arg_index=0;arg_index_inside_quotes=1;}
+			//getting a token (sub argument) inside linux shell
 			if(check_if_str_is_prefix_of_dstr(&launch_command,left,"\\\""))
 				{c='\"';right=left+1;}
 			else if(launch_command.data[left]=='\''){c='\'';right=left;}
 			else{c=' ';right=left;}
 			while(launch_command.data[++right]!=c)if(right>=end){right=end-1;break;}
 			if(launch_command.data[right]==' '&&c==' ')--right;
-			append_string_to_dstr(&log_str,"--> sub argument:",' ',0);
+			//print the sub argument to the log
+			append_string_to_dstr(&log_str,"  --> sub argument:",' ',0);
 			c=launch_command.data[right+1];
 			launch_command.data[right+1]='\0';
 			append_string_to_dstr(&log_str,launch_command.data+left,'\n',0);
 			launch_command.data[right+1]=c;
+			//do the sub argument check
 			i=check_for_special_program_keyword(&launch_command,left,right);
-			if(i&1)
+			if(i&1)//proton magic keyword detected
 			{
-				write_arg_index=1;
+				write_arg_index=1;//the arg_index cannot be determined yet
 				append_string_to_dstr(&log_str,"^proton magic keyword above^",'\n',0);
 			}
-			if(i&2)
+			if(i&2)//wine or proton executable detected
 			{
-				write_arg_index=1;
+				write_arg_index=1;//the arg_index cannot be determined yet
 				append_string_to_dstr(&log_str,"^wine or proton arg above^",'\n',0);
 			}
-			if(i&4)append_string_to_dstr(&log_str,"[WARN] ^bash shell on bash shell^",'\n',0);
+			if(i&4)//If some launcher has this in practice, that launcher is very evil! :(
+				append_string_to_dstr(&log_str,"[WARN] ^bash shell on bash shell^",'\n',0);
 			left=right+1;
 		}
-		if(write_arg_index)
+		if(write_arg_index)//unable to properly parse linux shell argument (bad input?)
 			append_string_to_dstr(&log_str,"[WARN] Unexpected end of string!",'\n',0);
 	}
-	else if(is_both_string_equal(str->data,"\"--\""))
+	else if(is_both_string_equal(str->data,"\"--\""))//this program arguments before "--"
 	{
 		steam_index=index;
 		arg_index=launch_command.length;
@@ -268,16 +310,22 @@ void append_argument(char*value)
 	}
 	return;
 }
-void write_argument_to_file(FILE*f,int index)
+void write_argument_to_file(FILE*f,int index)//write arg received by this program to file
 {
-	if(index>=steam_index)return;
+	if(index>=steam_index)return;//for safety reasons, any arguments after "--" is not allowed
 	argvx[index].data[argvx[index].length-2]='\0';
 	fprintf(f,"%s",argvx[index].data+1);
 	argvx[index].data[argvx[index].length-2]='\"';
 	return;
 }
+/* Begin code for custom file I/O management (until "End of custom file I/O code" comment)
+ * This is needed because using fopen directly will access the file from random directory:
+ *  it could be launcer directory, steam directory, game directory or even injector directory
+ * This custom I/O let the program to access the file under injector directory:
+ *  the folder where the cmd_inject executable is located
+ */
 int injector_path_index;dstr injector_path;
-void init_injector_path()
+void init_injector_path()//find the path of cmd_inject and save it
 {
 	append_string_to_dstr(&log_str,"\n===[injector path]===",'\n',0);
 	append_string_to_dstr(&log_str,"Detecting injector path...",'\n',0);
@@ -294,7 +342,7 @@ void init_injector_path()
 	append_string_to_dstr(&log_str,"!",'\n',0);
 	return;
 }
-void create_full_file_injector_path(char*filename)
+void create_full_file_injector_path(char*filename)//construct full path of filename
 {
 	injector_path.length=injector_path_index;
 	while(*filename)append_char_to_dstr(&injector_path,*filename++,0);
@@ -302,7 +350,7 @@ void create_full_file_injector_path(char*filename)
 	append_char_to_dstr(&injector_path,'\0',0);
 	return;
 }
-FILE* open_file_on_injector_path(char*filename,char*mode)
+FILE* open_file_on_injector_path(char*filename,char*mode)//open on the same path as cmd_inject
 {
 	FILE*f;
 	create_full_file_injector_path(filename);
@@ -319,15 +367,17 @@ FILE* open_file_on_injector_path(char*filename,char*mode)
 	}
 	return f;
 }
-void check_an_injector(FILE*f,char*injector_name,dstr*arg)
+//End of custom file I/O code
+void check_an_injector(FILE*f,char*injector_name,dstr*arg)//check any progam not just injector
 {
 	FILE*ff;int i;char c;
 	ff=open_file_on_injector_path(injector_name,"r");
+	append_string_to_dstr(&log_str,"  -->",' ',0);
 	if(ff!=NULL)
 	{
 		fclose(ff);
 		fprintf(f,"start \"\" \"%s\"",injector_name);
-		for(i=-1;++i<arg->length;)
+		for(i=-1;++i<arg->length;)//write the corresponding program arguments to config.bat
 		{
 			if(arg->data[i]<'0'||'9'<arg->data[i])continue;
 			fprintf(f," \"%%");
@@ -337,19 +387,16 @@ void check_an_injector(FILE*f,char*injector_name,dstr*arg)
 		fputc('\n',f);
 		append_string_to_dstr(&log_str,"found",' ',0);
 		append_string_to_dstr(&log_str,injector_name,' ',1);
-		append_string_to_dstr(&log_str,"on injector path!",' ',0);
+		append_string_to_dstr(&log_str,"on injector path!",'\n',0);
 	}
 	else
 	{
 		append_string_to_dstr(&log_str,injector_name,' ',1);
-		append_string_to_dstr(&log_str,"not found!",' ',0);
+		append_string_to_dstr(&log_str,"not found!",'\n',0);
 	}
-	append_string_to_dstr(&log_str,"Full list of argument index for that program: ",'[',0);
-	append_string_to_dstr(&log_str,arg->data,']',0);
-	append_char_to_dstr(&log_str,'\n',0);
 	return;
 }
-void load_injector_list(FILE*f,char*config_name)
+void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the injector list
 {
 	FILE*ff;int cur,max_arg,value;dstr arg,exe;
 	ff=open_file_on_injector_path(config_name,"r");
@@ -358,84 +405,114 @@ void load_injector_list(FILE*f,char*config_name)
 	if(ff==NULL)
 	{
 		append_string_to_dstr(&log_str,"Config file not found, generating new one!",'\n',0);
+		generate_injector_list_conf:;//generate the list
 		ff=open_file_on_injector_path(config_name,"w");
 		fprintf(ff,"#cmd inject version: %s\n",CMD_INJECT_VERSION);
-		fprintf(ff,"#note: you can list your custom injector here to be auto detected\n");
+		fprintf(ff,"#source code: https://github.com/Stereo-3D/cmd_inject\n");
+		fprintf(ff,"#note: you can list your custom injector here to be auto detected!\n");
+		fprintf(ff,"#      don't forget to remove the first line if you want to prevent'\n");
+		fprintf(ff,"#      this file overwritten by the program (keep changes permanent)'\n");
 		fprintf(ff,"#format: \"<injector exe>\" <arg_idx_a> <arg_idx_b> ... <arg_idx_n>\n");
+		fprintf(ff,"#        don't forget to put quote your program name when editing!'\n");
 		fprintf(ff,"#arg_idx: is a non negative integer but useful arguments start with 1\n");
-		fprintf(ff,"# if arg_idx is equal to zero (0) that contain this program name \n");
-		fprintf(ff,"# and it's fullpath which is useless for the injector arguments'\n");
-		fprintf(ff,"# remember you could also edit \"config.bat\" to whatever you like\n");
-		fprintf(ff,"# don't forget to remove the first commented line on \"config.bat\"!\n");
-		fprintf(ff,"# so that config.bat is not overwritten by this program\n");
+		fprintf(ff,"#  if arg_idx is equal to zero (0) that contain this program name \n");
+		fprintf(ff,"#  and it's fullpath which is useless for the injector arguments'\n");
+		fprintf(ff,"#  remember you could also edit \"config.bat\" to whatever you like\n");
+		fprintf(ff,"#  don't forget to remove the first commented line on \"config.bat\"!\n");
+		fprintf(ff,"#  so that your changes made to \"config.bat\" is kept permanent!\n");
+		fprintf(ff,"#  in other word to prevent \"config.bat\" overwritten by the program\n");
 		fprintf(ff,"\"inject64.exe\" 1\n");
 		fprintf(ff,"\"inject32.exe\" 1\n");
 		fprintf(ff,"\"3DMigoto Loader.exe\"\n");
 		fclose(ff);
 		ff=open_file_on_injector_path(config_name,"r");
 	}
-	else append_string_to_dstr(&log_str,"Config file found!",'\n',0);
+	else
+	{
+		append_string_to_dstr(&log_str,"Config file found!",'\n',0);
+		cur=fscanf(ff,"%20c",buffer);buffer[20]='\0';//cheack if the file is autogenerated
+		if(is_both_string_equal(buffer,"#cmd inject version:"))
+		{
+			append_string_to_dstr(&log_str,"Config file seems to be auto generated!",' ',0);
+			append_string_to_dstr(&log_str,"Replacing it with new one...",'\n',0);
+			fclose(ff);
+			goto generate_injector_list_conf;
+		}
+	}
 	arg.data=NULL;arg.length=arg.alloc=0;
 	exe.data=NULL;exe.length=exe.alloc=0;
-	for(cur=fgetc(ff);cur!=EOF;)
+	append_string_to_dstr(&log_str,"Detecting injectors:",'\n',0);
+	for(fseek(ff,0,SEEK_SET),cur=fgetc(ff);cur!=EOF;)//parsing the entire lists
 	{
 		if((char)cur=='#')while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n');
-		else if((char)cur=='\"')
+		else if((char)cur=='\"')//valid line detected
 		{
 			exe.length=arg.length=0;
 			while((cur=fgetc(ff))!=EOF&&(char)cur!='\"'&&(char)cur!='\r'&&(char)cur!='\n')
-				append_char_to_dstr(&exe,(char)cur,0);
+				append_char_to_dstr(&exe,(char)cur,0);//copy the exe name
 			append_char_to_dstr(&exe,'\0',0);
 			if(cur=='\"')
 			{
 				max_arg=0;
-				while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n')
+				while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n')//parse the arg
 				{
 					if((char)cur<'0'||'9'<(char)cur)continue;
 					for(value=0;'0'<=(char)cur&&(char)cur<='9';cur=fgetc(ff))
 					{
 						value=10*value+(cur&15);
-						append_char_to_dstr(&arg,(char)cur,0);
+						append_char_to_dstr(&arg,(char)cur,0);//copy the arg digit
 					}
 					if(value>max_arg)max_arg=value;
-					append_char_to_dstr(&arg,' ',0);
+					append_char_to_dstr(&arg,',',0);//separate the arg (separator symbol: ',')
 					if(cur==EOF||(char)cur=='\r'||(char)cur=='\n')break;
 				}
+				//finalize arg data
 				if(!arg.length)*arg.data='\0';
 				else arg.data[arg.length-1]='\0';
-				if(max_arg<steam_index)check_an_injector(f,exe.data,&arg);
+				if(max_arg<steam_index)check_an_injector(f,exe.data,&arg);//all args is valid
 				else
 				{
-					append_string_to_dstr(&log_str,"[WARN] detection of",' ',0);
+					append_string_to_dstr(&log_str,"  --> [WARN] detection of",' ',0);
 					append_string_to_dstr(&log_str,exe.data,' ',1);
 					append_string_to_dstr(&log_str,"is skipped because number of",' ',0);
 					append_string_to_dstr(&log_str,"program arguments needed ",'(',0);
 					sprintf(buffer,"%d) is exceeding number of given arguments ",max_arg);
 					append_string_to_dstr(&log_str,buffer,'(',0);
-					sprintf(buffer,"%d)! here is the full prog argument: ",steam_index-1);
-					append_string_to_dstr(&log_str,buffer,'[',0);
-					append_string_to_dstr(&log_str,arg.data,']',0);
-					append_char_to_dstr(&log_str,'\n',0);
+					sprintf(buffer,"%d)!",steam_index-1);
+					append_string_to_dstr(&log_str,buffer,'\n',0);
 				}
+				//print all args to log file (useful for debuging)
+				append_string_to_dstr(&log_str,"      Full argument index",' ',0);
+				append_string_to_dstr(&log_str,"list for that program: ",'[',0);
+				append_string_to_dstr(&log_str,arg.data,']',0);
+				append_char_to_dstr(&log_str,'\n',0);
 			}
 		}
-		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;
+		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;//#for comment, \ for progname
 	}
 	append_string_to_dstr(&log_str,"Done detecting all injectors in the list!",'\n',0);
 	if(arg.data)free(arg.data);
 	if(exe.data)free(exe.data);
 	return;
 }
-FILE* generate_bat_config(char*bat_filename)
+FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated config.bat
 {
+	/* Note that "config.bat" is not meant to execute directly because it only contain partial
+	 *  bat command that will be processed further to create "launcher.bat"!
+	 * It will not support receiving argument because the argument variables is different than
+	 *  the standard bat script, the argument variables will be replaced by the exact argument
+	 *  this program receive when generating "launcher.bat"!
+	*/
 	FILE*f;
 	f=open_file_on_injector_path(bat_filename,"w");
 	fprintf(f,"rem ove this line to make this config permanent! ");
 	fprintf(f,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
-	fprintf(f,"pushd %%~dp0\n");
+	fprintf(f,"rem ind that cmd_inject source code is available on github: ");
+	fprintf(f,"https://github.com/Stereo-3D/cmd_inject\n");
+	fprintf(f,"pushd %%~dp0\n");//bat command to change the directory to where config.bat is
 	fprintf(f,"rem ember to put your injetor and its arguments between pushd and popd\n");
 	load_injector_list(f,"injecttor_list.conf");
-	fprintf(f,"popd");
+	fprintf(f,"popd");//bat command to go back to previous directory you are in before pushd
 	fclose(f);
 	return open_file_on_injector_path(bat_filename,"r");
 }
@@ -443,8 +520,9 @@ int main(int argc,char**argv)
 {
 	//receiving argumnents parameter and initializing the program
 	int i,j,ret=-1;FILE*f,*ff;argv0=argv[0];
-	sprintf(buffer,"cmd_inject version: %s",CMD_INJECT_VERSION);
-	append_string_to_dstr(&log_str,buffer,'\n',0);
+	sprintf(buffer,"cmd_inject version: %s\nSource code:",CMD_INJECT_VERSION);
+	append_string_to_dstr(&log_str,buffer,' ',0);
+	append_string_to_dstr(&log_str,"https://github.com/Stereo-3D/cmd_inject",'\n',0);
 	append_string_to_dstr(&log_str,"\n===[Injector Argument]===",'\n',0);
 	for(i=-1;++i<argc;)append_argument(argv[i]);
 	init_injector_path();
@@ -457,7 +535,7 @@ int main(int argc,char**argv)
 	}
 	else
 	{
-		j=fscanf(f,"%8c",buffer);buffer[8]='\0';
+		j=fscanf(f,"%8c",buffer);buffer[8]='\0';//cheack if the file is autogenerated
 		if(is_both_string_equal(buffer,"rem ove "))
 		{
 			append_string_to_dstr(&log_str,"\n===[Config Bat Log]===",'\n',0);
@@ -496,23 +574,14 @@ int main(int argc,char**argv)
 	create_full_file_injector_path("launcher.bat");
 	if(arg_index_inside_quotes)
 		injector_path.data[injector_path.length-2]=injector_path.data[0]='\'';
-	append_string_to_dstr(&launch_command,injector_path.data,'\0',0);
-	if(extra_command.data)
-	{
-		--launch_command.length;
-		append_string_to_dstr(&launch_command,extra_command.data,'\0',0);
-		free(extra_command.data);
-	}
+	append_string_to_dstr(&launch_command,injector_path.data,'?',0);
+	--launch_command.length;//remove the extra '?' symbol from launch_command
+	append_string_to_dstr(&launch_command,extra_command.data,'\0',0);
 	append_string_to_dstr(&log_str,"\n===[Launch Command]===",'\n',0);
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
 	//cleaning up and freeing memory
-	if(argvx)
-	{
-		for(i=-1;++i<argix;)if(argvx[i].data)free(argvx[i].data);
-		free(argvx);
-	}
-	if(injector_path.data)free(injector_path.data);
-	if(log_str.data)free(log_str.data);
+	for(i=-1;++i<argix;)free(argvx[i].data);
+	free(argvx);free(extra_command.data);free(injector_path.data);free(log_str.data);
 	ret=system(launch_command.data);//launching injected launch command
 	free(launch_command.data);
 	return ret;
