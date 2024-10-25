@@ -25,7 +25,7 @@
  */
 #include<stdio.h>
 #include<stdlib.h>
-#define CMD_INJECT_VERSION "v0.3.1"
+#define CMD_INJECT_VERSION "v0.3.2"
 int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
 {
 	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
@@ -511,7 +511,7 @@ void dict_destroy(dict*dct)
 //End of dictionary code
 void check_an_injector(FILE*f,char*injector_name,dstr*arg)//check any progam not just injector
 {
-	FILE*ff;int i;char c;
+	FILE*ff;int i,inside_quotes=0,escape;char c;
 	ff=open_file_on_injector_path(injector_name,"r");
 	append_string_to_dstr(&log_str,"  -->",' ',0);
 	if(ff!=NULL)
@@ -521,9 +521,16 @@ void check_an_injector(FILE*f,char*injector_name,dstr*arg)//check any progam not
 		fprintf(f,"start \"\" \"%s\"",injector_name);
 		for(i=-1;++i<arg->length;)//write the corresponding program arguments to config.bat
 		{
-			if(arg->data[i]!='-'&&(arg->data[i]<'0'||'9'<arg->data[i]))continue;
+			if(inside_quotes)
+			{
+				escape=(c=arg->data[i])=='\\'?escape+1:0;fputc(c,f);
+				if(c=='\"'&&!(escape&1))inside_quotes=0;
+				continue;
+			}
+			if((c=arg->data[i])=='\"'){inside_quotes=1;escape=0;fprintf(f," \"");continue;}
+			if(c!='-'&&(c<'0'||'9'<c))continue;
 			fprintf(f," %%");
-			if(arg->data[i]=='-'){fputc('-',f);++i;}
+			if(c=='-'){fputc('-',f);++i;}
 			for(c='?',--i;++i<arg->length&&'0'<=(c=arg->data[i])&&c<='9';)fputc(c,f);
 			if(c=='*')fputc(c,f);
 		}
@@ -541,7 +548,7 @@ void check_an_injector(FILE*f,char*injector_name,dstr*arg)//check any progam not
 }
 void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the injector list
 {
-	FILE*ff;int cur,max_arg_positive,max_arg_negative,neg,value;dstr arg,exe;
+	FILE*ff;int cur,max_arg_positive,max_arg_negative,neg,value,inside_quotes,escape;dstr arg,exe;
 	ff=open_file_on_injector_path(config_name,"r");
 	append_string_to_dstr(&log_str,"Opening config file:",' ',0);
 	append_string_to_dstr(&log_str,config_name,'\n',1);
@@ -557,7 +564,9 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 		fprintf(ff,"#      this file overwritten by the program (keep changes permanent)'\n");
 		fprintf(ff,"#format: \"<injector exe>\" <arg_idx_a> <arg_idx_b> ... <arg_idx_n>\n");
 		fprintf(ff,"#        don't forget to put quote your program name when editing!'\n");
-		fprintf(ff,"#arg_idx: is an integer and can be negative\n");
+		fprintf(ff,"#arg_idx: is either a string or an integer and can be negative\n");
+		fprintf(ff,"#  if arg_idx is enclosed with quotes that means it's a constant\n");
+		fprintf(ff,"#    string and the value will be copied exactly to the injector args\n");
 		fprintf(ff,"#  if arg_idx is positivie then it access this program argument\n");
 		fprintf(ff,"#  if arg_idx is negative then it access game argument: start from -1\n");
 		fprintf(ff,"#  if arg_idx is equal to zero (0) that contain this program name \n");
@@ -570,11 +579,26 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 		fprintf(ff,"#don't forget to remove the first commented line on \"config.bat\"!\n");
 		fprintf(ff,"#so that your changes made to \"config.bat\" is kept permanent!\n");
 		fprintf(ff,"#in other word to prevent \"config.bat\" overwritten by the program\n");
-		fprintf(ff,"\"inject64.exe\" 1\n");
-		fprintf(ff,"\"inject32.exe\" 1\n");
-		fprintf(ff,"\"inject64.exe\" -0\n");
-		fprintf(ff,"\"inject32.exe\" -0\n");
+		//Nefarius Injector: https://github.com/nefarius/Injector
+		fprintf(ff,"\"Injector.exe\" \"--process-name\" 1 \"--inject\" 2*\n");
+		fprintf(ff,"\"Injector.exe\" \"--process-name\" -0 \"--inject\" 1*\n");
+		//ReShade Injector: https://github.com/crosire/reshade
+		fprintf(ff,"\"inject64.exe\" 1\n\"inject32.exe\" 1\n");
+		fprintf(ff,"\"inject64.exe\" -0\n\"inject32.exe\" -0\n");
+		//3DMigoto Loader: https://github.com/bo3b/3Dmigoto
 		fprintf(ff,"\"3DMigoto Loader.exe\"\n");
+		//Gensin FPS Unlocker: https://github.com/34736384/genshin-fps-unlock
+		fprintf(ff,"\"unlockfps_nc.exe\"\n");
+		fprintf(ff,"\"unlockfps_nc_signed.exe\"\n");
+		//Another FPS Unlocker: (git link redacted)
+		fprintf(ff,"\"fpsunlock.exe\" 1 2\n");
+		fprintf(ff,"\"fpsunlock.exe\" 1\n");
+		//jadeite loader-autopatcher: (git link redacted)
+		fprintf(ff,"\"jadeite.exe\" 1 2\n");
+		fprintf(ff,"\"jadeite.exe\" 1 \"--\"\n");
+		//harmonic_loader: (git link redacted)
+		fprintf(ff,"\"harmonic_loader.exe\" 1 2 3\n");
+		fprintf(ff,"\"harmonic_loader.exe\" 1 2 \"--\"\n");
 		fclose(ff);
 		ff=open_file_on_injector_path(config_name,"r");
 	}
@@ -604,9 +628,18 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 			append_char_to_dstr(&exe,'\0',0);
 			if(cur=='\"')
 			{
-				max_arg_positive=max_arg_negative=0;
+				max_arg_positive=max_arg_negative=inside_quotes=0;
 				while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n')//parse the arg
 				{
+					if(inside_quotes)
+					{
+						escape=cur=='\\'?escape+1:0;
+						if(cur=='\"'&&!(escape&1))inside_quotes=0;
+						append_char_to_dstr(&arg,cur,0);
+						if(!inside_quotes)append_char_to_dstr(&arg,',',0);
+						continue;
+					}
+					if(cur=='\"'){inside_quotes=1;append_char_to_dstr(&arg,cur,escape=0);continue;}
 					if((char)cur!='-'&&((char)cur<'0'||'9'<(char)cur))continue;
 					if((neg=cur=='-')){append_char_to_dstr(&arg,'-',0);cur=fgetc(ff);}
 					for(value=0;'0'<=(char)cur&&(char)cur<='9';cur=fgetc(ff))
@@ -621,6 +654,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 					if(cur==EOF||(char)cur=='\r'||(char)cur=='\n')break;
 				}
 				//finalize arg data
+				if(inside_quotes)append_string_to_dstr(&arg,escape&1?"\\\"":"\"",',',0);
 				if(!arg.length)*arg.data='\0';
 				else arg.data[arg.length-1]='\0';
 				if(max_arg_positive>=steam_index||max_arg_negative>=argiy)
@@ -648,11 +682,17 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 				}
 				else check_an_injector(f,exe.data,&arg);
 				//print all args to log file (useful for debuging)
+				if(inside_quotes)
+				{
+					append_string_to_dstr(&log_str,"      [WARN] Unterminated quotes for arg constant!",' ',0);
+					append_string_to_dstr(&log_str,"(unexpected end of line)!",'\n',0);
+				}
 				append_string_to_dstr(&log_str,"      Full argument index",' ',0);
 				append_string_to_dstr(&log_str,"list for that program: ",'[',0);
 				append_string_to_dstr(&log_str,arg.data,']',0);
 				append_char_to_dstr(&log_str,'\n',0);
 			}
+			else append_string_to_dstr(&log_str,"  --> [WARN] Unterminated quotes for exe name! (unexpected end of line)!",'\n',0);
 		}
 		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;//#for comment, \ for progname
 	}
@@ -693,10 +733,17 @@ int main(int argc,char**argv)
 	append_string_to_dstr(&log_str,"https://github.com/Stereo-3D/cmd_inject",'\n',0);
 	append_string_to_dstr(&log_str,"\n===[Injector Argument]===",'\n',0);
 	for(i=-1;++i<argc;)append_argument(argv[i]);
+	if(launch_command.data==NULL)
+	{
+		append_string_to_dstr(&launch_command,"\"",'\"',0);
+		append_string_to_dstr(&log_str,"[WARN] launch command is empty! Make sure",' ',0);
+		append_string_to_dstr(&log_str,"you have put \"--\" before %command%!",'\n',0);
+	}
+	if(arg_index==launch_command.length)append_string_to_dstr(&launch_command,"\"",'\"',0);
 	convert_critical_argument_to_windows_format();
 	init_injector_path();
-	sprintf(buffer,"Launch mode: \"%s\"\n",launch_mode<3?launch_mode<2?!launch_mode?
-		"Error!":"No Launch!":"Injector Only!":"All Programs Will be Launched!");
+	sprintf(buffer,"Launch mode: \"%s\"!",launch_mode<3?launch_mode<2?!launch_mode?
+		"Error":"No Launch":"Injector Only":"All Programs Will be Launched");
 	append_string_to_dstr(&log_str,buffer,'\n',0);
 	//creating or parsing "config.bat"
 	f=open_file_on_injector_path("config.bat","r");
@@ -740,12 +787,6 @@ int main(int argc,char**argv)
 	}
 	fclose(f);fclose(ff);
 	//attempting to inject launcher.bat to launch command
-	if(launch_command.data==NULL)
-	{
-		append_string_to_dstr(&launch_command,"\"",'\"',0);
-		append_string_to_dstr(&log_str,"[WARN] launch command is empty! Make sure",' ',0);
-		append_string_to_dstr(&log_str,"you have put \"--\" before %command%!",'\n',0);
-	}
 	launch_command.length=arg_index;
 	create_full_file_injector_path("launcher.bat");
 	if(arg_index_inside_quotes)
