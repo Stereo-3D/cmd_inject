@@ -25,7 +25,7 @@
  */
 #include<stdio.h>
 #include<stdlib.h>
-#define CMD_INJECT_VERSION "v0.3.0"
+#define CMD_INJECT_VERSION "v0.3.1"
 int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
 {
 	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
@@ -229,7 +229,7 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 	append_game_argument(&game_arg,0,game_arg.length-1);
 	if(!arg_index_inside_quotes)
 		for(j=game_index;++j<argix;)
-			append_game_argument(argvx+j,0,argvx[j].length-1);
+			append_game_argument(argvx+j,0,argvx[j].length-2);
 	//copy the remaining argument for game argument
 	for(j=0;(c=launch_command.data[arg_index+i++])!='\0';)
 	{
