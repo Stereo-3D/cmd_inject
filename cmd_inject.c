@@ -1,11 +1,12 @@
 /* cmd_inject: Command injector for both Steam Windows and Steam Linux
  *             plus some other launcher with editable launch command
- * Original project on Github: https://github.com/Stereo-3D/cmd_inject
- * Copyleft 🄯 2024 Tjandra Satria Gunawan (discord: tjandra, email: tjandra@yandex.com)
+ * Original project link on Github: https://github.com/Stereo-3D/cmd_inject
+ * Copyleft 🄯 and Copyright © 2024 Tjandra Satria Gunawan
+ *   (Discord: tjandra | Youtube: https://youtube.com/@TjandraSG | Email: tjandra@yandex.com)
  * License: GNU GENERAL PUBLIC LICENSE
  *          Version 3, 29 June 2007
  *          https://www.gnu.org/licenses/gpl-3.0.en.html
- * Incomplete list of terms inside GPL v3 ^for more info visit the link above^:
+ * List of terms inside GPL v3: ^for more detailed terms visit the link above^:
  *   Permissions:
  *     - Anyone can copy, modify and distribute this software.
  *     - You can use this software privately.
@@ -25,7 +26,7 @@
  */
 #include<stdio.h>
 #include<stdlib.h>
-#define CMD_INJECT_VERSION "v0.3.2"
+#define CMD_INJECT_VERSION "v0.3.3"
 int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
 {
 	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
@@ -154,7 +155,7 @@ void append_string_to_dstr(dstr*str,char*string,char end_symbol,int write_quotes
 	append_char_to_dstr(str,end_symbol,0);
 	return;
 }
-dstr*argvy;int argiy,argly;char buffer[128];
+dstr*argvy;int argiy,argly;char buffer[128];//argvy is storing game's arguments
 void append_game_argument(dstr*game_arg,int left,int right)
 {
 	sprintf(buffer,"  --> Game argument [%d]:",argiy);
@@ -167,7 +168,7 @@ void append_game_argument(dstr*game_arg,int left,int right)
 	append_string_to_dstr(&log_str,str->data,'\n',0);
 	return;
 }
-dstr*argvx,launch_command,extra_command;
+dstr*argvx,launch_command,extra_command;//argvx is storing this program's arguments
 int arg_index,arg_index_inside_quotes,game_index,argix,arglx;
 void convert_critical_argument_to_windows_format()//and copy arguments to corresponding var
 {
@@ -392,9 +393,9 @@ void append_argument(char*value)//also parse and identify each arguments on the 
 		is_both_string_equal(str->data,"\"==\"")||
 		is_both_string_equal(str->data,"\"~~\""))
 	{
-		if(is_both_string_equal(str->data,"\"--\""))launch_mode=3;
-		if(is_both_string_equal(str->data,"\"==\""))launch_mode=2;
-		if(is_both_string_equal(str->data,"\"~~\""))launch_mode=1;
+		if(is_both_string_equal(str->data,"\"--\""))launch_mode=3;//launch game and injectors
+		if(is_both_string_equal(str->data,"\"==\""))launch_mode=2;//launch injector only
+		if(is_both_string_equal(str->data,"\"~~\""))launch_mode=1;//no launch but generate log
 		steam_index=index;game_index=argix;
 		arg_index=launch_command.length;
 		append_string_to_dstr(&log_str,"\n===[Steam Argument]===",'\n',0);
@@ -548,7 +549,8 @@ void check_an_injector(FILE*f,char*injector_name,dstr*arg)//check any progam not
 }
 void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the injector list
 {
-	FILE*ff;int cur,max_arg_positive,max_arg_negative,neg,value,inside_quotes,escape;dstr arg,exe;
+	FILE*ff;dstr arg,exe;
+	int cur,max_arg_positive,max_arg_negative,neg,value,inside_quotes,escape;
 	ff=open_file_on_injector_path(config_name,"r");
 	append_string_to_dstr(&log_str,"Opening config file:",' ',0);
 	append_string_to_dstr(&log_str,config_name,'\n',1);
@@ -587,7 +589,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 		fprintf(ff,"\"inject64.exe\" -0\n\"inject32.exe\" -0\n");
 		//3DMigoto Loader: https://github.com/bo3b/3Dmigoto
 		fprintf(ff,"\"3DMigoto Loader.exe\"\n");
-		//Gensin FPS Unlocker: https://github.com/34736384/genshin-fps-unlock
+		//Genshin FPS Unlocker: https://github.com/34736384/genshin-fps-unlock
 		fprintf(ff,"\"unlockfps_nc.exe\"\n");
 		fprintf(ff,"\"unlockfps_nc_signed.exe\"\n");
 		//Another FPS Unlocker: (git link redacted)
@@ -629,7 +631,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 			if(cur=='\"')
 			{
 				max_arg_positive=max_arg_negative=inside_quotes=0;
-				while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n')//parse the arg
+				while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n')//parse the args
 				{
 					if(inside_quotes)
 					{
@@ -639,7 +641,12 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 						if(!inside_quotes)append_char_to_dstr(&arg,',',0);
 						continue;
 					}
-					if(cur=='\"'){inside_quotes=1;append_char_to_dstr(&arg,cur,escape=0);continue;}
+					if(cur=='\"')
+					{
+						inside_quotes=1;
+						append_char_to_dstr(&arg,cur,escape=0);
+						continue;
+					}
 					if((char)cur!='-'&&((char)cur<'0'||'9'<(char)cur))continue;
 					if((neg=cur=='-')){append_char_to_dstr(&arg,'-',0);cur=fgetc(ff);}
 					for(value=0;'0'<=(char)cur&&(char)cur<='9';cur=fgetc(ff))
@@ -659,16 +666,16 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 				else arg.data[arg.length-1]='\0';
 				if(max_arg_positive>=steam_index||max_arg_negative>=argiy)
 				{
-					append_string_to_dstr(&log_str,"  --> [WARN] detection of",' ',0);
+					append_string_to_dstr(&log_str,"  --> Detection of",' ',0);
 					append_string_to_dstr(&log_str,exe.data,' ',1);
-					append_string_to_dstr(&log_str,"is skipped because number of",' ',0);
-					sprintf(buffer,"%s arguments",max_arg_negative<argiy?"game":"program");
+					append_string_to_dstr(&log_str,"is skipped because\n       ",' ',0);
+					sprintf(buffer,"%s arguments",max_arg_negative<argiy?"program":"game");
 					append_string_to_dstr(&log_str,buffer,' ',0);
 					append_string_to_dstr(&log_str,"needed ",'(',0);
-					sprintf(buffer,"%d) is exceeding number of given ",
+					sprintf(buffer,"%d) is exceeding given",
 							max_arg_negative<argiy?max_arg_positive:max_arg_negative);
 					append_string_to_dstr(&log_str,buffer,' ',0);
-					sprintf(buffer,"%s arguments ",max_arg_negative<argiy?"game":"program");
+					sprintf(buffer,"%s arguments ",max_arg_negative<argiy?"program":"game");
 					append_string_to_dstr(&log_str,buffer,'(',0);
 					sprintf(buffer,"%d)!",max_arg_negative<argiy?steam_index-1:argiy-1);
 					append_string_to_dstr(&log_str,buffer,'\n',0);
@@ -677,22 +684,28 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 				{
 					append_string_to_dstr(&log_str,"  --> [WARN] detection of",' ',0);
 					append_string_to_dstr(&log_str,exe.data,' ',1);
-					append_string_to_dstr(&log_str,"is skipped because the program ha",'s',0);
-					append_string_to_dstr(&log_str," been added to \"config.bat\"!",'\n',0);
+					append_string_to_dstr(&log_str,"is skipped because\n       ",' ',0);
+					append_string_to_dstr(&log_str,"the program has been",' ',0);
+					append_string_to_dstr(&log_str,"added to \"config.bat\"!",'\n',0);
 				}
 				else check_an_injector(f,exe.data,&arg);
 				//print all args to log file (useful for debuging)
 				if(inside_quotes)
 				{
-					append_string_to_dstr(&log_str,"      [WARN] Unterminated quotes for arg constant!",' ',0);
-					append_string_to_dstr(&log_str,"(unexpected end of line)!",'\n',0);
+					append_string_to_dstr(&log_str,"      [WARN] Unterminated quotes",' ',0);
+					append_string_to_dstr(&log_str,"for arg constant! (unexpected end",' ',0);
+					append_string_to_dstr(&log_str," of line)!",'\n',0);
 				}
 				append_string_to_dstr(&log_str,"      Full argument index",' ',0);
 				append_string_to_dstr(&log_str,"list for that program: ",'[',0);
 				append_string_to_dstr(&log_str,arg.data,']',0);
 				append_char_to_dstr(&log_str,'\n',0);
 			}
-			else append_string_to_dstr(&log_str,"  --> [WARN] Unterminated quotes for exe name! (unexpected end of line)!",'\n',0);
+			else
+			{
+				append_string_to_dstr(&log_str,"  --> [WARN] Unterminated quotes for",' ',0);
+				append_string_to_dstr(&log_str,"exe name! (unexpected end of line)!",'\n',0);
+			}
 		}
 		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;//#for comment, \ for progname
 	}
@@ -727,7 +740,7 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 int main(int argc,char**argv)
 {
 	//receiving argumnents parameter and initializing the program
-	int i,j,ret=-1;FILE*f,*ff;argv0=argv[0];
+	int i,j,ret=0;FILE*f,*ff;argv0=argv[0];
 	sprintf(buffer,"cmd_inject version: %s\nSource code:",CMD_INJECT_VERSION);
 	append_string_to_dstr(&log_str,buffer,' ',0);
 	append_string_to_dstr(&log_str,"https://github.com/Stereo-3D/cmd_inject",'\n',0);
