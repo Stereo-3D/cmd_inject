@@ -1,32 +1,32 @@
-/* cmd_inject: Command injector for both Steam Windows and Steam Linux
- *             plus some other launcher with editable launch command
- * Original project link on Github: https://github.com/Stereo-3D/cmd_inject
- * Copyleft 🄯 and Copyright © 2024 Tjandra Satria Gunawan
- *   (Discord: tjandra | Youtube: https://youtube.com/@TjandraSG | Email: tjandra@yandex.com)
- * License: GNU GENERAL PUBLIC LICENSE
- *          Version 3, 29 June 2007
- *          https://www.gnu.org/licenses/gpl-3.0.en.html
- * List of terms inside GPL v3: ^for more detailed terms visit the link above^:
- *   Permissions:
- *     - Anyone can copy, modify and distribute this software.
- *     - You can use this software privately.
- *     - You can use this software for commercial purposes.
- *   Conditions:
- *     - License and copyright notice: You have to include the license and copyright notice
- *                                     with each and every distribution.
- *     - State changes: If you modify it, you have to indicate changes made to the code.
- *     - Same license: Any modifications of this code base MUST be distributed
- *                     with the same license, GPLv3.
- *     - Disclose source: Source code must be made available
- *                        when the licensed material is distributed.
- *   Limitations:
- *     - Warranty: This software is provided without warranty.
- *     - Liability: The software author or license can not be held liable for
- *                  any damages inflicted by the software.
- */
+#define CMD_INJECT_VERSION "v0.3.4"
+#define LICENSE "===[LICENSE.txt]===\n\
+cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
+            plus some other launcher with editable launch command\n\
+Original project link on Github: https://github.com/Stereo-3D/cmd_inject\n\
+Copyright � 2024 Tjandra Satria Gunawan\n\
+  (Email: tjandra@yandex.com | Youtube: https://youtube.com/@TjandraSG | Discord: tjandra)\n\
+License: GNU GENERAL PUBLIC LICENSE\n\
+         Version 3, 29 June 2007\n\
+         https://www.gnu.org/licenses/gpl-3.0.en.html\n\
+List of terms inside GPL v3: ^for more detailed terms visit the link above^:\n\
+  Permissions:\n\
+    - Anyone can copy, modify, and distribute this software.\n\
+    - You can use this software privately.\n\
+    - You can use this software for commercial purposes.\n\
+  Conditions:\n\
+    - License and copyright notice: You have to include the license and copyright notice\n\
+                                    with each and every distribution.\n\
+    - State changes: If you modify it, you have to indicate changes made to the code.\n\
+    - Same license: Any modifications of this code base MUST be distributed\n\
+                    with the same license, GPLv3.\n\
+    - Disclose source: Source code must be made available\n\
+                       when the licensed material is distributed.\n\
+  Limitations:\n\
+    - Warranty: This software is provided without warranty.\n\
+    - Liability: The software author or license can not be held liable for\n\
+                 any damages inflicted by the software.\n"
 #include<stdio.h>
 #include<stdlib.h>
-#define CMD_INJECT_VERSION "v0.3.3"
 int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
 {
 	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
@@ -712,7 +712,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 	append_string_to_dstr(&log_str,"Done detecting all injectors in the list!",'\n',0);
 	if(arg.data)free(arg.data);
 	if(exe.data)free(exe.data);
-	dict_destroy(root);root=NULL;
+	dict_destroy(root);root=NULL;fclose(ff);
 	return;
 }
 FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated config.bat
@@ -723,7 +723,7 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 	 *  the standard bat script, the argument variables will be replaced by the exact argument
 	 *  this program receive when generating "launcher.bat"!
 	*/
-	FILE*f;
+	FILE*f,*ff;char*bfr;
 	f=open_file_on_injector_path(bat_filename,"w");
 	fprintf(f,"rem ove this line to make this config permanent! ");
 	fprintf(f,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
@@ -731,6 +731,30 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 	fprintf(f,"https://github.com/Stereo-3D/cmd_inject\n");
 	fprintf(f,"pushd %%~dp0\n");//bat command to change the directory to where config.bat is
 	fprintf(f,"rem ember to put your injetor and its arguments between pushd and popd\n");
+	if(launch_mode&2)//if launch mode enabled, need to generate & show the license to end user
+	{
+		ff=open_file_on_injector_path("LICENSE.txt","r");
+		if(ff==NULL)//check if first time run
+		{
+			generate_license_txt:;//regenerate license
+			append_string_to_dstr(&log_str,"Generating new \"LICENSE.txt\"...",'\n',0);
+			ff=open_file_on_injector_path("LICENSE.txt","w");
+			fprintf(ff,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
+			fprintf(ff,"%s",LICENSE);fclose(ff);
+			fprintf(f,"start \"\" \"notepad.exe\" \"LICENSE.txt\"\n");//show the license
+		}
+		else
+		{
+			sprintf(buffer,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
+			for(bfr=buffer-1;*++bfr!='\0';)if(fgetc(ff)!=*bfr)//check validity of LICENSE.txt
+			{
+				append_string_to_dstr(&log_str,"\"LICENSE.txt\" is outdated!",'\n',0);
+				fclose(ff);goto generate_license_txt;//LICENSE.txt is outdated, updating
+			}
+			fclose(ff);//LICENSE.txt is valid and no need to show it again
+			append_string_to_dstr(&log_str,"\"LICENSE.txt\" is valid!",'\n',0);
+		}
+	}
 	load_injector_list(f,"injecttor_list.conf");
 	fprintf(f,"popd\n");//bat command to go back to previous directory you are in before pushd
 	if(launch_mode&1)fprintf(f,"start \"\" %%-1*\n");
@@ -772,8 +796,7 @@ int main(int argc,char**argv)
 		{
 			append_string_to_dstr(&log_str,"\n===[Config Bat Log]===",'\n',0);
 			append_string_to_dstr(&log_str,"Overwriting \"config.bat\" file!",'\n',0);
-			fclose(f);
-			f=generate_bat_config("config.bat");
+			fclose(f);f=generate_bat_config("config.bat");
 		}
 	}
 	//generating "launcher.bat"
