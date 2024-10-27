@@ -1,8 +1,12 @@
-#define CMD_INJECT_VERSION "v0.3.4"
+#define CMD_INJECT_VERSION "v0.4.0"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
 Original project link on Github: https://github.com/Stereo-3D/cmd_inject\n\
+Special Thanks:\n\
+  - Jose Negrete AKA BlueSkyDefender <UntouchableBlueSky@gmail.com>\n\
+      for leting me extract and using list of App hash database from his awesome \"Overwatch.fxh\":\n\
+        https://github.com/BlueSkyDefender/Depth3D/blob/master/Shaders/Overwatch.fxh\n\
 Copyright © 2024 Tjandra Satria Gunawan\n\
   (Email: tjandra@yandex.com | Youtube: https://youtube.com/@TjandraSG | Discord: tjandra)\n\
 License: GNU GENERAL PUBLIC LICENSE\n\
@@ -25,13 +29,10 @@ List of terms inside GPL v3: ^for more detailed terms visit the link above^:\n\
     - Warranty: This software is provided without warranty.\n\
     - Liability: The software author or license can not be held liable for\n\
                  any damages inflicted by the software.\n"
-#include<stdio.h>
-#include<stdlib.h>
-int is_both_string_equal(char*a,char*b)//with this no need to include string.h anymore!
-{
-	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
-	return*a==*b;
-}
+#include<stdio.h>//give the program ability to read and write file
+#include<stdlib.h>//give the program ability to re-allocate memory
+#include<dirent.h>//give the program ability to scan game folder
+#include"hash.h"//using ReShade's app hash function and database extracted from Overwatch.fxh
 typedef struct Dynamic_String{char*data;int length,alloc;}dstr;
 int check_if_str_is_prefix_of_dstr(dstr*str,int str_index,char*keyword)
 {
@@ -155,7 +156,8 @@ void append_string_to_dstr(dstr*str,char*string,char end_symbol,int write_quotes
 	append_char_to_dstr(str,end_symbol,0);
 	return;
 }
-dstr*argvy;int argiy,argly;char buffer[128];//argvy is storing game's arguments
+dstr*argvy;int argiy,argly;char buffer[512],mindiff[512];//argvy is storing game's arguments
+void replace_argvy(char*value){argvy->length=0;append_string_to_dstr(argvy,value,'\0',1);return;}
 void append_game_argument(dstr*game_arg,int left,int right)
 {
 	sprintf(buffer,"  --> Game argument [%d]:",argiy);
@@ -168,7 +170,57 @@ void append_game_argument(dstr*game_arg,int left,int right)
 	append_string_to_dstr(&log_str,str->data,'\n',0);
 	return;
 }
-dstr*argvx,launch_command,extra_command;//argvx is storing this program's arguments
+void scan_dir_for_exact_name(dstr*exe)
+{
+	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
+	int match=0,index=exe->length,i,min_diff=999;char c;DIR*dir;struct dirent*ent;
+	while(index--&&(c=exe->data[index])!='\\'&&c!='/');
+	c=exe->data[++index];
+	exe->data[index]='\0';
+	if((dir=opendir(exe->data))==NULL)//try opening folder from game args
+	{
+		append_string_to_dstr(&log_str,"[WARN] Cannot open folder:",' ',0);
+		append_string_to_dstr(&log_str,exe->data,'\n',1);
+		dir=opendir(".");//try to open current working folder instead
+	}
+	exe->data[index]=c;
+	if(dir==NULL)//cannot open any folder :( bad os permission?
+	{
+		append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
+		append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
+		return;
+	}
+	while((ent=readdir(dir))!=NULL)//walk through the folder (non recursive to avoid scanning entire disk)
+	{
+		if(check_hash(ent->d_name))//check match on Overwatch.fxh extracted database
+		{
+			append_string_to_dstr(&log_str,"Found hash match:",' ',0);
+			append_string_to_dstr(&log_str,ent->d_name,'\n',1);
+			if(!match++)
+			{
+				for(i=-1;ent->d_name[++i]!='\0';)buffer[i]=ent->d_name[i];
+				buffer[i]='\0';
+			}
+			else append_string_to_dstr(&log_str,"[WARN] Multiple hash matches found!",'\n',0);
+		}
+		if((i=compare_case_insensitive(ent->d_name,exe->data+index))>=0)//check for case insensitive match
+		{
+			append_string_to_dstr(&log_str,"Found case insensitive match:",' ',0);
+			append_string_to_dstr(&log_str,ent->d_name,'\n',1);
+			if(i<min_diff)
+			{
+				min_diff=i;
+				for(i=-1;ent->d_name[++i]!='\0';)mindiff[i]=ent->d_name[i];
+				mindiff[i]='\0';
+			}
+			else append_string_to_dstr(&log_str,"Rejecting the value because it's worse!",'\n',0);
+		}
+	}
+	if(match==1)replace_argvy(buffer);
+	else if(min_diff<512)replace_argvy(mindiff);
+	return;
+}
+dstr*argvx,launch_command,extra_command,game_exe;//argvx is storing this program's arguments
 int arg_index,arg_index_inside_quotes,game_index,argix,arglx;
 void convert_critical_argument_to_windows_format()//and copy arguments to corresponding var
 {
@@ -193,30 +245,30 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 	if(converting)
 	{
 		if(launch_command.data[arg_index+i]=='/')append_string_to_dstr(&game_arg,"Z",':',0);
-		if(check_if_str_is_prefix_of_dstr(&launch_command,arg_index+i,"./"))i+=2;
+		if(check_if_str_is_prefix_of_dstr(&launch_command,arg_index+i,"./"))
+			{append_string_to_dstr(&game_exe,".",'/',0);i+=2;}
 	}
-	append_string_to_dstr(&log_str,"Current game argument:",' ',0);
-	for(j=-1;++j<i;)append_char_to_dstr(&log_str,launch_command.data[arg_index+j],0);
 	while((c=launch_command.data[arg_index+i++])!=terminate_symbol)
 	{
 		if(arg_index_inside_quotes&&!(escape&1)&&c=='\"')break;
-		append_char_to_dstr(&log_str,c,0);
+		if(escape&1&&(c=='\"'||c=='\\'))game_exe.data[game_exe.length-1]=c;
+		else append_char_to_dstr(&game_exe,c,0);
 		if(c=='/'&&converting)append_char_to_dstr(&game_arg,'\\',1);
 		else append_char_to_dstr(&game_arg,c,0);
 		escape=c=='\\'?escape+1:0;
 		if((escape&2)&&(c=launch_command.data[arg_index+i])==terminate_symbol)
 		{
 			escape=0;
-			if(c==' ')game_arg.length-=2;
-			if(c!='\''){append_char_to_dstr(&game_arg,c,0);++i;}
+			if(c==' '){game_arg.length-=2;--game_exe.length;}
+			if(c!='\''){append_char_to_dstr(&game_arg,c,0);append_char_to_dstr(&game_exe,c,0);++i;}
 		}
 	}
 	//finalizing the data for main game argument
-	//if(terminate_symbol==' ')--i;//with new algorithm no need to do this anymore
-	append_char_to_dstr(&log_str,terminate_symbol,0);
-	append_char_to_dstr(&log_str,'\n',0);
 	if(arg_index_inside_quotes&&(escape&1)&&c=='\"')game_arg.data[game_arg.length-1]=c;
 	else append_char_to_dstr(&game_arg,'\"',0);
+	append_string_to_dstr(&log_str,"Current game argument:",' ',0);
+	append_char_to_dstr(&game_exe,'\0',0);
+	append_string_to_dstr(&log_str,game_exe.data,'\n',1);
 	if(converting)
 	{
 		append_char_to_dstr(&game_arg,'\0',0);
@@ -243,11 +295,10 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 		if(!j)
 		{
 			if(c==' '){escape=0;continue;}
-			j=1;terminate_symbol=c;
+			j=1;terminate_symbol=' ';
 			if(c=='\\'&&launch_command.data[arg_index+i]=='\"')
 				{++i;++escape;c=terminate_symbol='\"';}
 			else if(c=='\'')terminate_symbol='\'';
-			else terminate_symbol=' ';
 			append_string_to_dstr(&game_arg," ",'\"',0);
 			left=game_arg.length-1;
 			if(terminate_symbol==' ')append_char_to_dstr(&game_arg,c,0);
@@ -283,11 +334,7 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 	for(;c!='\0';c=launch_command.data[arg_index+i++])append_char_to_dstr(&extra_command,c,0);
 	//finalizing the data for remaining variables
 	append_char_to_dstr(&extra_command,'\0',0);
-	append_char_to_dstr(&game_arg,'\0',0);
-	launch_command.length=arg_index;
-	append_string_to_dstr(&launch_command,game_arg.data,'\0',0);
-	if(game_arg.data)free(game_arg.data);
-	append_string_to_dstr(&log_str,"Done processing game argument!",'\n',0);
+	free(game_arg.data);append_string_to_dstr(&log_str,"Done processing game argument!",'\n',0);
 	return;
 }
 int steam_index,nested_shell_detected,launch_mode;
@@ -746,10 +793,21 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 		else
 		{
 			sprintf(buffer,"cmd_inject version: %s\n",CMD_INJECT_VERSION);
-			for(bfr=buffer-1;*++bfr!='\0';)if(fgetc(ff)!=*bfr)//check validity of LICENSE.txt
+			for(bfr=buffer-1;*++bfr!='\0';)if((char)fgetc(ff)!=*bfr)//check validity of LICENSE.txt
 			{
 				append_string_to_dstr(&log_str,"\"LICENSE.txt\" is outdated!",'\n',0);
 				fclose(ff);goto generate_license_txt;//LICENSE.txt is outdated, updating
+			}
+			for(bfr=LICENSE-1;*++bfr!='\0';)if((char)fgetc(ff)!=*bfr)//check validity more thoroughly
+			{
+				printf("ding! %d \'%c\'\n",*bfr,*bfr);
+				append_string_to_dstr(&log_str,"\"LICENSE.txt\" is changed and need to be fixed!",'\n',0);
+				fclose(ff);goto generate_license_txt;//LICENSE.txt is changed, fixing
+			}
+			if(fgetc(ff)!=EOF)
+			{
+				append_string_to_dstr(&log_str,"\"LICENSE.txt\" has extra data and need to be fix!",'\n',0);
+				fclose(ff);goto generate_license_txt;//It is forbiden to add more data on LICENSE.txt!
 			}
 			fclose(ff);//LICENSE.txt is valid and no need to show it again
 			append_string_to_dstr(&log_str,"\"LICENSE.txt\" is valid!",'\n',0);
@@ -778,6 +836,7 @@ int main(int argc,char**argv)
 	}
 	if(arg_index==launch_command.length)append_string_to_dstr(&launch_command,"\"",'\"',0);
 	convert_critical_argument_to_windows_format();
+	scan_dir_for_exact_name(&game_exe);
 	init_injector_path();
 	sprintf(buffer,"Launch mode: \"%s\"!",launch_mode<3?launch_mode<2?!launch_mode?
 		"Error":"No Launch":"Injector Only":"All Programs Will be Launched");
@@ -834,7 +893,7 @@ int main(int argc,char**argv)
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
 	//cleaning up and freeing memory
 	for(i=-1;++i<argix;)free(argvx[i].data);
-	free(argvx);free(extra_command.data);free(injector_path.data);free(log_str.data);
+	free(argvx);free(extra_command.data);free(injector_path.data);free(log_str.data);free(game_exe.data);
 	if(launch_mode&2)ret=system(launch_command.data);//launching injected launch command
 	free(launch_command.data);
 	return ret;
