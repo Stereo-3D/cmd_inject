@@ -57,5 +57,8 @@ dkms.conf
 *.bat
 *.conf
 *.kate-swp
+hash
+hash.c
+hash_extractor
 cmd_inject_linux32
 cmd_inject_linux64
