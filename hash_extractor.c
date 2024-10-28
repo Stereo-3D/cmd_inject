@@ -33,8 +33,10 @@ int main()
 		hashes[hash_len++]=k;
 	}
 	fclose(f);
-	printf("hash_len=%u\n",--hash_len);//discard last 0x77777777 hash :v
-	qsort(hashes,hash_len,sizeof(u),cmp);
+	qsort(hashes,--hash_len,sizeof(u),cmp);//discard last 0x77777777 hash :v
+	for(i=j=0;++j<hash_len;)if(hashes[i]!=hashes[j])hashes[++i]=hashes[j];//remove duplicates
+	printf("hash_len=%d\n",hash_len=++i);
+	printf("duplicate hash found: %d\n",j-i);
 	putchar('{');
 	for(i=-1;++i<hash_len;)printf("%s0x%xu%c",i&7?"":"\n",hashes[i],i<hash_len-1?',':'}');
 	putchar('\n');
