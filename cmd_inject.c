@@ -1,4 +1,4 @@
-#define CMD_INJECT_VERSION "v0.4.0"
+#define CMD_INJECT_VERSION "v0.4.1"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
@@ -170,52 +170,86 @@ void append_game_argument(dstr*game_arg,int left,int right)
 	append_string_to_dstr(&log_str,str->data,'\n',0);
 	return;
 }
+typedef struct FOLDER_OBJECT{DIR*dir;dstr paths;int depth;}fold;
+fold*folders;int folder_alloc,folder_len;
+int depth_limit,depth_limit_work_dir=1,depth_limit_game_dir=4;//4 should be enough for most UE games
+int append_folder(char*path,char*folder_name,int depth)
+{
+	if(depth>=depth_limit)return 0;//depth limit exceeded
+	if(folder_len==folder_alloc)
+		folders=(fold*)realloc(folders,(folder_alloc=folder_alloc<<1|1)*sizeof(fold));
+	fold*fldr;fldr=folders+folder_len;
+	fldr->depth=depth+1;fldr->paths.data=NULL;
+	fldr->paths.alloc=fldr->paths.length=0;
+	append_string_to_dstr(&fldr->paths,path,'?',0);--fldr->paths.length;
+	append_string_to_dstr(&fldr->paths,folder_name,'/',0);
+	append_char_to_dstr(&fldr->paths,'\0',0);
+	if((fldr->dir=opendir(fldr->paths.data))!=NULL){++folder_len;return 1;}
+	free(fldr->paths.data);
+	return 0;
+}
 void scan_dir_for_exact_name(dstr*exe)
 {
 	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
-	int match=0,index=exe->length,i,min_diff=999;char c;DIR*dir;struct dirent*ent;
+	int match=0,index=exe->length,i,folder_now,min_diff=999,depth;
+	char c,*paths;DIR*dir;struct dirent*ent;
 	while(index--&&(c=exe->data[index])!='\\'&&c!='/');
-	c=exe->data[++index];
-	exe->data[index]='\0';
-	if((dir=opendir(exe->data))==NULL)//try opening folder from game args
+	if(index<0){index=0;goto try_opening_work_dir;}
+	c=exe->data[index];exe->data[index]='\0';
+	depth_limit=depth_limit_game_dir;
+	if(!append_folder(exe->data,"",0))//try opening folder from game args
 	{
+		exe->data[index++]=c;
 		append_string_to_dstr(&log_str,"[WARN] Cannot open folder:",' ',0);
 		append_string_to_dstr(&log_str,exe->data,'\n',1);
-		dir=opendir(".");//try to open current working folder instead
-	}
-	exe->data[index]=c;
-	if(dir==NULL)//cannot open any folder :( bad os permission?
-	{
-		append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
-		append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
-		return;
-	}
-	while((ent=readdir(dir))!=NULL)//walk through the folder (non recursive to avoid scanning entire disk)
-	{
-		if(check_hash(ent->d_name))//check match on Overwatch.fxh extracted database
+		try_opening_work_dir:;
+		depth_limit=depth_limit_work_dir;
+		if(!append_folder(".","",0))//try opening current working directory
 		{
-			append_string_to_dstr(&log_str,"Found hash match:",' ',0);
-			append_string_to_dstr(&log_str,ent->d_name,'\n',1);
-			if(!match++)
-			{
-				for(i=-1;ent->d_name[++i]!='\0';)buffer[i]=ent->d_name[i];
-				buffer[i]='\0';
-			}
-			else append_string_to_dstr(&log_str,"[WARN] Multiple hash matches found!",'\n',0);
-		}
-		if((i=compare_case_insensitive(ent->d_name,exe->data+index))>=0)//check for case insensitive match
-		{
-			append_string_to_dstr(&log_str,"Found case insensitive match:",' ',0);
-			append_string_to_dstr(&log_str,ent->d_name,'\n',1);
-			if(i<min_diff)
-			{
-				min_diff=i;
-				for(i=-1;ent->d_name[++i]!='\0';)mindiff[i]=ent->d_name[i];
-				mindiff[i]='\0';
-			}
-			else append_string_to_dstr(&log_str,"Rejecting the value because it's worse!",'\n',0);
+			append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
+			append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
+			return;//cannot open any folder :( bad os permission?
 		}
 	}
+	else exe->data[index++]=c;
+	for(folder_now=-1;++folder_now<folder_len;)
+	{
+		dir=folders[folder_now].dir;
+		depth=folders[folder_now].depth;
+		paths=folders[folder_now].paths.data;
+		append_string_to_dstr(&log_str,"Scanning folder:",' ',0);
+		append_string_to_dstr(&log_str,paths,'\n',1);
+		while((ent=readdir(dir))!=NULL)//walk through the current folder
+		{
+			if(is_both_string_equal(ent->d_name,"."))continue;//avoid going to this folder
+			if(is_both_string_equal(ent->d_name,".."))continue;//avoid going to parent folder
+			append_folder(paths,ent->d_name,depth);//try to enter the next folder
+			if(check_hash(ent->d_name))//check match on Overwatch.fxh extracted database
+			{
+				append_string_to_dstr(&log_str,"Found hash match:",' ',0);
+				append_string_to_dstr(&log_str,ent->d_name,'\n',1);
+				if(!match++)
+				{
+					for(i=-1;ent->d_name[++i]!='\0';)buffer[i]=ent->d_name[i];
+					buffer[i]='\0';
+				}
+				else append_string_to_dstr(&log_str,"[WARN] Multiple hash matches found!",'\n',0);
+			}
+			if((i=compare_case_insensitive(ent->d_name,exe->data+index))>=0)//check case insensitive match
+			{
+				append_string_to_dstr(&log_str,"Found case insensitive match:",' ',0);
+				append_string_to_dstr(&log_str,ent->d_name,'\n',1);
+				if(i<min_diff)
+				{
+					for(min_diff=i,i=-1;ent->d_name[++i]!='\0';)mindiff[i]=ent->d_name[i];
+					mindiff[i]='\0';
+				}
+				else append_string_to_dstr(&log_str,"Rejecting the value because it's worse!",'\n',0);
+			}
+		}
+		closedir(dir);free(paths);
+	}
+	if(folders)free(folders);
 	if(match==1)replace_argvy(buffer);
 	else if(min_diff<512)replace_argvy(mindiff);
 	return;
@@ -529,6 +563,67 @@ FILE* open_file_on_injector_path(char*filename,char*mode)//open on the same path
 	return f;
 }
 //End of custom file I/O code
+void load_app_list_extra(char*list_name)
+{
+	append_string_to_dstr(&log_str,"\n===[App List Loader]===",'\n',0);
+	FILE*f;int cur;
+	append_string_to_dstr(&log_str,"Opening app list file:",' ',0);
+	append_string_to_dstr(&log_str,list_name,'\n',1);
+	f=open_file_on_injector_path(list_name,"r");
+	if(f==NULL)
+	{
+		append_string_to_dstr(&log_str,"App list file not found, generating new one!",'\n',0);
+		generate_app_list_conf:;//generate the list
+		f=open_file_on_injector_path(list_name,"w");
+		fprintf(f,"#cmd inject version: %s\n",CMD_INJECT_VERSION);
+		fprintf(f,"#source code: https://github.com/Stereo-3D/cmd_inject\n");
+		fprintf(f,"#note: you can list your custom game apps here to be auto detected!\n");
+		fprintf(f,"#      don't forget to remove the first line if you want to prevent'\n");
+		fprintf(f,"#      this file overwritten by the program (keep changes permanent)'\n");
+		fprintf(f,"#format: each line is a name of program in with .exe format exstension\n");
+		fprintf(f,"#        you can put \'#\' at the begining of line to comment it\n");
+		fprintf(f,"#There is 817+ apps list already stored inside this program!\n");
+		fprintf(f,"#What you want to add here is most likely duplicates ;)\n");
+		//fprintf(f,"GenshinImpact.exe\n");//add duplicates for testing purposes
+		fprintf(f,"r5apex_dx12.exe");//no new line at the end of file for testing purposes
+		fclose(f);
+		f=open_file_on_injector_path(list_name,"r");
+	}
+	else
+	{
+		append_string_to_dstr(&log_str,"App list file found!",'\n',0);
+		cur=fscanf(f,"%20c",buffer);buffer[20]='\0';//cheack if the file is autogenerated
+		if(is_both_string_equal(buffer,"#cmd inject version:"))
+		{
+			append_string_to_dstr(&log_str,"App list file seems to be auto generated!",' ',0);
+			append_string_to_dstr(&log_str,"Replacing it with new one...",'\n',0);
+			fclose(f);goto generate_app_list_conf;
+		}
+	}
+	dstr exe;exe.data=NULL;exe.alloc=0;hash_init();
+	for(fseek(f,0,SEEK_SET);(cur=fgetc(f))!=EOF;)
+	{
+		if(cur=='\r'||cur=='\n')continue;
+		if((char)cur=='#')
+		{
+			while((cur=fgetc(f))!=EOF&&(char)cur!='\r'&&(char)cur!='\n');//skip commented line
+			continue;
+		}
+		exe.length=0;
+		do append_char_to_dstr(&exe,(char)cur,0);
+		while((cur=fgetc(f))!=EOF&&(char)cur!='\r'&&(char)cur!='\n');
+		append_char_to_dstr(&exe,'\0',0);
+		append_string_to_dstr(&log_str,"Adding",' ',0);
+		append_string_to_dstr(&log_str,exe.data,' ',1);
+		append_string_to_dstr(&log_str,"to the list...",'\n',0);
+		if(hash_app_add(exe.data))
+			append_string_to_dstr(&log_str,"[WARN] application is not in .exe exstension!",'\n',0);
+	}
+	if(exe.data)free(exe.data);
+	sprintf(buffer,"Duplicate hashes found in app list: %d",hash_finalize());
+	append_string_to_dstr(&log_str,buffer,'\n',0);fclose(f);
+	return;
+}
 //Begin of Dictionary code to remember what exe from conf have been added to config.bat
 typedef struct Dict{struct Dict*child[256];int exist;}dict;
 dict*root;
@@ -659,8 +754,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 		{
 			append_string_to_dstr(&log_str,"Config file seems to be auto generated!",' ',0);
 			append_string_to_dstr(&log_str,"Replacing it with new one...",'\n',0);
-			fclose(ff);
-			goto generate_injector_list_conf;
+			fclose(ff);goto generate_injector_list_conf;
 		}
 	}
 	arg.data=NULL;arg.length=arg.alloc=0;
@@ -671,9 +765,12 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 		if((char)cur=='#')while((cur=fgetc(ff))!=EOF&&(char)cur!='\r'&&(char)cur!='\n');
 		else if((char)cur=='\"')//valid line detected
 		{
-			exe.length=arg.length=0;
-			while((cur=fgetc(ff))!=EOF&&(char)cur!='\"'&&(char)cur!='\r'&&(char)cur!='\n')
+			exe.length=arg.length=escape=0;
+			while((cur=fgetc(ff))!=EOF&&((char)cur!='\"'||escape&1)&&(char)cur!='\r'&&(char)cur!='\n')
+			{
 				append_char_to_dstr(&exe,(char)cur,0);//copy the exe name
+				escape=cur=='\\'?escape+1:0;
+			}
 			append_char_to_dstr(&exe,'\0',0);
 			if(cur=='\"')
 			{
@@ -754,7 +851,7 @@ void load_injector_list(FILE*f,char*config_name)//can parse & auto generate the 
 				append_string_to_dstr(&log_str,"exe name! (unexpected end of line)!",'\n',0);
 			}
 		}
-		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;//#for comment, \ for progname
+		while((cur=fgetc(ff))!=EOF)if(cur=='#'||cur=='\"')break;//#for comment, " for progname
 	}
 	append_string_to_dstr(&log_str,"Done detecting all injectors in the list!",'\n',0);
 	if(arg.data)free(arg.data);
@@ -800,7 +897,6 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 			}
 			for(bfr=LICENSE-1;*++bfr!='\0';)if((char)fgetc(ff)!=*bfr)//check validity more thoroughly
 			{
-				printf("ding! %d \'%c\'\n",*bfr,*bfr);
 				append_string_to_dstr(&log_str,"\"LICENSE.txt\" is changed and need to be fixed!",'\n',0);
 				fclose(ff);goto generate_license_txt;//LICENSE.txt is changed, fixing
 			}
@@ -819,6 +915,69 @@ FILE* generate_bat_config(char*bat_filename)//return FILE pointer to generated c
 	fclose(f);
 	return open_file_on_injector_path(bat_filename,"r");
 }
+void load_cmd_inject_config(char*ini_filename)
+{
+	FILE*f;int cur,i;
+	f=open_file_on_injector_path(ini_filename,"r");
+	append_string_to_dstr(&log_str,"\n===[cmd_inject config]===",'\n',0);
+	append_string_to_dstr(&log_str,"Opening configuration file:",' ',0);
+	append_string_to_dstr(&log_str,ini_filename,'\n',1);
+	if(f==NULL)
+	{
+		append_string_to_dstr(&log_str,"Configuration file not found! creating new one...",'\n',0);
+		create_ini_file:;
+		f=open_file_on_injector_path(ini_filename,"w");
+		fprintf(f,";cmd inject version: %s\n",CMD_INJECT_VERSION);
+		fprintf(f,";remove the first line if you want to change the variable value!\n");
+		fprintf(f,";depth limit work dir: the recursion depth to scan folder on work dir\n");
+		fprintf(f,";depth limit game dir: the recursion depth to scan folder on game dir\n");
+		fprintf(f,"[cmd_inject]\n");
+		fprintf(f,"depth_limit_work_dir = 1\n");
+		fprintf(f,"depth_limit_game_dir = 4\n");
+		fclose(f);
+		f=open_file_on_injector_path(ini_filename,"r");
+	}
+	else
+	{
+		append_string_to_dstr(&log_str,"Configuration file found!",'\n',0);
+		cur=fscanf(f,"%20c",buffer);buffer[20]='\0';//cheack if the file is autogenerated
+		if(is_both_string_equal(buffer,";cmd inject version:"))
+		{
+			append_string_to_dstr(&log_str,"Configuration file seems to be auto generated!",' ',0);
+			append_string_to_dstr(&log_str,"Replacing it with new one...",'\n',0);
+			fclose(f);goto create_ini_file;
+		}
+	}
+	for(fseek(f,0,SEEK_SET);(cur=fscanf(f,"%s",buffer))!=EOF;)
+	{
+		if(is_both_string_equal(buffer,"depth_limit_work_dir"))
+		{
+			while((cur=fgetc(f))!=EOF&&(char)cur!='='&&(char)cur!='\r'&&(char)cur!='\n');
+			if((char)cur=='=')
+			{
+				cur=fscanf(f,"%d",&i);
+				depth_limit_work_dir=i;
+				sprintf(buffer,"depth_limit_work_dir = %d",i);
+				append_string_to_dstr(&log_str,buffer,'\n',0);
+			}
+		}
+		else if(is_both_string_equal(buffer,"depth_limit_game_dir"))
+		{
+			while((cur=fgetc(f))!=EOF&&(char)cur!='='&&(char)cur!='\r'&&(char)cur!='\n');
+			if((char)cur=='=')
+			{
+				cur=fscanf(f,"%d",&i);
+				depth_limit_game_dir=i;
+				sprintf(buffer,"depth_limit_game_dir = %d",i);
+				append_string_to_dstr(&log_str,buffer,'\n',0);
+			}
+		}
+		if(cur!=EOF)while((cur=fgetc(f))!=EOF&&(char)cur!='\r'&&(char)cur!='\n');
+		if(cur==EOF)break;
+	}
+	fclose(f);
+	return;
+}
 int main(int argc,char**argv)
 {
 	//receiving argumnents parameter and initializing the program
@@ -836,8 +995,10 @@ int main(int argc,char**argv)
 	}
 	if(arg_index==launch_command.length)append_string_to_dstr(&launch_command,"\"",'\"',0);
 	convert_critical_argument_to_windows_format();
-	scan_dir_for_exact_name(&game_exe);
 	init_injector_path();
+	load_cmd_inject_config("cmd_inject.ini");
+	load_app_list_extra("game_app_list.conf");
+	scan_dir_for_exact_name(&game_exe);
 	sprintf(buffer,"Launch mode: \"%s\"!",launch_mode<3?launch_mode<2?!launch_mode?
 		"Error":"No Launch":"Injector Only":"All Programs Will be Launched");
 	append_string_to_dstr(&log_str,buffer,'\n',0);
@@ -893,7 +1054,8 @@ int main(int argc,char**argv)
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
 	//cleaning up and freeing memory
 	for(i=-1;++i<argix;)free(argvx[i].data);
-	free(argvx);free(extra_command.data);free(injector_path.data);free(log_str.data);free(game_exe.data);
+	free(argvx);free(extra_command.data);free(injector_path.data);
+	free(log_str.data);free(game_exe.data);free(hashes);
 	if(launch_mode&2)ret=system(launch_command.data);//launching injected launch command
 	free(launch_command.data);
 	return ret;
