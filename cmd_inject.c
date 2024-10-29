@@ -1,4 +1,4 @@
-#define CMD_INJECT_VERSION "v0.4.1"
+#define CMD_INJECT_VERSION "v0.4.2"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
@@ -157,7 +157,13 @@ void append_string_to_dstr(dstr*str,char*string,char end_symbol,int write_quotes
 	return;
 }
 dstr*argvy;int argiy,argly;char buffer[512],mindiff[512];//argvy is storing game's arguments
-void replace_argvy(char*value){argvy->length=0;append_string_to_dstr(argvy,value,'\0',1);return;}
+void replace_argvy(char*value)
+{
+	append_string_to_dstr(&log_str,"New auto-detected game exe argument:",' ',0);
+	append_string_to_dstr(&log_str,value,'\n',1);argvy->length=0;
+	append_string_to_dstr(argvy,value,'\0',1);
+	return;
+}
 void append_game_argument(dstr*game_arg,int left,int right)
 {
 	sprintf(buffer,"  --> Game argument [%d]:",argiy);
@@ -171,87 +177,123 @@ void append_game_argument(dstr*game_arg,int left,int right)
 	return;
 }
 typedef struct FOLDER_OBJECT{DIR*dir;dstr paths;int depth;}fold;
-fold*folders;int folder_alloc,folder_len;
+fold*folders;int folder_alloc,folder_len;char folder_separator='/';
 int depth_limit,depth_limit_work_dir=1,depth_limit_game_dir=4;//4 should be enough for most UE games
-int append_folder(char*path,char*folder_name,int depth)
+int append_folder(dstr*path,char*folder_name,int depth)
 {
-	if(depth>=depth_limit)return 0;//depth limit exceeded
 	if(folder_len==folder_alloc)
 		folders=(fold*)realloc(folders,(folder_alloc=folder_alloc<<1|1)*sizeof(fold));
+	int index=--path->length,ret_code=2;
+	append_string_to_dstr(path,folder_name,folder_separator,0);//combine path and folder name
+	append_char_to_dstr(path,'\0',0);
+	//initialize folder data
 	fold*fldr;fldr=folders+folder_len;
 	fldr->depth=depth+1;fldr->paths.data=NULL;
 	fldr->paths.alloc=fldr->paths.length=0;
-	append_string_to_dstr(&fldr->paths,path,'?',0);--fldr->paths.length;
-	append_string_to_dstr(&fldr->paths,folder_name,'/',0);
-	append_char_to_dstr(&fldr->paths,'\0',0);
-	if((fldr->dir=opendir(fldr->paths.data))!=NULL){++folder_len;return 1;}
-	free(fldr->paths.data);
-	return 0;
+	if((fldr->dir=opendir(path->data))!=NULL)//try opening folder: /path/foldername
+	{
+		if(depth<depth_limit)//add the new folder to the queue
+		{
+			append_string_to_dstr(&fldr->paths,path->data,'\0',0);
+			++folder_len;ret_code=0;
+		}
+		else{closedir(fldr->dir);ret_code=1;}//depth limit reached
+	}
+	path->length=index;append_char_to_dstr(path,'\0',0);//restore path to original state
+	return ret_code;
 }
 void scan_dir_for_exact_name(dstr*exe)
 {
 	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
 	int match=0,index=exe->length,i,folder_now,min_diff=999,depth;
-	char c,*paths;DIR*dir;struct dirent*ent;
-	while(index--&&(c=exe->data[index])!='\\'&&c!='/');
-	if(index<0){index=0;goto try_opening_work_dir;}
-	c=exe->data[index];exe->data[index]='\0';
-	depth_limit=depth_limit_game_dir;
-	if(!append_folder(exe->data,"",0))//try opening folder from game args
+	char c;DIR*dir;struct dirent*ent;dstr paths,fname;
+	fname.length=fname.alloc=0;fname.data=NULL;//initialize data
+	while(index--&&(c=exe->data[index])!='\\'&&c!='/');//find the separator between path and filename
+	append_string_to_dstr(&fname,exe->data+index+1,'\0',0);//backup and copy filename
+	if(!++index)goto try_opening_work_dir;//if no path data found then try opening work dir instead
+	c=folder_separator=exe->data[exe->length=index-1];//get folder separator symbol (could be '\' or '/')
+	append_char_to_dstr(exe,'\0',0);//remove filename (leaving only the game paths)
+	depth_limit=depth_limit_game_dir;//set folder search limit
+	if(append_folder(exe,"",0))//try opening folder from game args
 	{
-		exe->data[index++]=c;
 		append_string_to_dstr(&log_str,"[WARN] Cannot open folder:",' ',0);
 		append_string_to_dstr(&log_str,exe->data,'\n',1);
 		try_opening_work_dir:;
-		depth_limit=depth_limit_work_dir;
-		if(!append_folder(".","",0))//try opening current working directory
+		exe->length=0;append_string_to_dstr(exe,".",'\0',0);
+		depth_limit=depth_limit_work_dir;folder_separator='/';
+		if(append_folder(exe,"",0))//try opening current working directory
 		{
+			//cannot open any folder :( bad os permission?
 			append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
 			append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
-			return;//cannot open any folder :( bad os permission?
 		}
 	}
-	else exe->data[index++]=c;
-	for(folder_now=-1;++folder_now<folder_len;)
+	for(folder_now=-1;++folder_now<folder_len;)//Breadth-first search without recursion :v
 	{
 		dir=folders[folder_now].dir;
 		depth=folders[folder_now].depth;
-		paths=folders[folder_now].paths.data;
+		paths=folders[folder_now].paths;
 		append_string_to_dstr(&log_str,"Scanning folder:",' ',0);
-		append_string_to_dstr(&log_str,paths,'\n',1);
+		append_string_to_dstr(&log_str,paths.data,'\n',1);
 		while((ent=readdir(dir))!=NULL)//walk through the current folder
 		{
 			if(is_both_string_equal(ent->d_name,"."))continue;//avoid going to this folder
 			if(is_both_string_equal(ent->d_name,".."))continue;//avoid going to parent folder
-			append_folder(paths,ent->d_name,depth);//try to enter the next folder
+			if((i=append_folder(&paths,ent->d_name,depth))<2)//trying to open the next folder
+			{
+				append_string_to_dstr(&log_str,"  --> Folder",' ',0);
+				append_string_to_dstr(&log_str,ent->d_name,' ',1);
+				if(i)append_string_to_dstr(&log_str,"is skipped because depth limit reached!",'\n',0);
+				else append_string_to_dstr(&log_str,"is added to queue to be scanned later!",'\n',0);
+				continue;
+			}
+			append_string_to_dstr(&log_str,"  --> Scanning file:",' ',0);
+			append_string_to_dstr(&log_str,ent->d_name,'\n',1);
 			if(check_hash(ent->d_name))//check match on Overwatch.fxh extracted database
 			{
-				append_string_to_dstr(&log_str,"Found hash match:",' ',0);
+				append_string_to_dstr(&log_str,"      - Found hash match:",' ',0);
 				append_string_to_dstr(&log_str,ent->d_name,'\n',1);
 				if(!match++)
 				{
 					for(i=-1;ent->d_name[++i]!='\0';)buffer[i]=ent->d_name[i];
 					buffer[i]='\0';
 				}
-				else append_string_to_dstr(&log_str,"[WARN] Multiple hash matches found!",'\n',0);
+				else append_string_to_dstr(&log_str,"      - [WARN] Multiple hash matches found!",'\n',0);
 			}
-			if((i=compare_case_insensitive(ent->d_name,exe->data+index))>=0)//check case insensitive match
+			if((i=compare_case_insensitive(ent->d_name,fname.data))>=0)//check case insensitive match
 			{
-				append_string_to_dstr(&log_str,"Found case insensitive match:",' ',0);
+				append_string_to_dstr(&log_str,"      - Found case insensitive match:",' ',0);
 				append_string_to_dstr(&log_str,ent->d_name,'\n',1);
 				if(i<min_diff)
 				{
 					for(min_diff=i,i=-1;ent->d_name[++i]!='\0';)mindiff[i]=ent->d_name[i];
 					mindiff[i]='\0';
 				}
-				else append_string_to_dstr(&log_str,"Rejecting the value because it's worse!",'\n',0);
+				else append_string_to_dstr(&log_str,"      - Rejecting the value because it's worse!",'\n',0);
 			}
 		}
-		closedir(dir);free(paths);
+		append_string_to_dstr(&log_str,"Closing folder:",' ',0);
+		append_string_to_dstr(&log_str,paths.data,'\n',1);
+		closedir(dir);free(paths.data);
+		if(match)
+		{
+			append_string_to_dstr(&log_str,"Aborting search because hash match has been found!",'\n',0);
+			break;//found the target exe, no need to check further
+		}
 	}
-	if(folders)free(folders);
-	if(match==1)replace_argvy(buffer);
-	else if(min_diff<512)replace_argvy(mindiff);
+	while(++folder_now<folder_len)//closing the remaining opened folder
+	{
+		append_string_to_dstr(&log_str,"Closing folder:",' ',0);
+		append_string_to_dstr(&log_str,folders[folder_now].paths.data,'\n',1);
+		closedir(folders[folder_now].dir);free(folders[folder_now].paths.data);
+	}
+	exe->length=index?index-1:0;//restore exe length
+	if(index)append_char_to_dstr(exe,c,0);//restore exe folder separator
+	append_string_to_dstr(exe,fname.data,'\0',0);//restore exe filename
+	if(0<min_diff&&min_diff<512)replace_argvy(mindiff);//case insensitive match found
+	if(match==1)replace_argvy(buffer);//unique application hashes found
+	if(fname.data)free(fname.data);//clean temporary filename variable
+	if(folders)free(folders);//clean folder stack
 	return;
 }
 dstr*argvx,launch_command,extra_command,game_exe;//argvx is storing this program's arguments
@@ -987,6 +1029,10 @@ int main(int argc,char**argv)
 	append_string_to_dstr(&log_str,"https://github.com/Stereo-3D/cmd_inject",'\n',0);
 	append_string_to_dstr(&log_str,"\n===[Injector Argument]===",'\n',0);
 	for(i=-1;++i<argc;)append_argument(argv[i]);
+	append_string_to_dstr(&log_str,"\n===[Launch Mode]===",'\n',0);
+	sprintf(buffer,"Launch mode: \"%s\"!",launch_mode<3?launch_mode<2?!launch_mode?
+		"Error":"No Launch":"Injector Only":"All Programs Will be Launched");
+	append_string_to_dstr(&log_str,buffer,'\n',0);
 	if(launch_command.data==NULL)
 	{
 		append_string_to_dstr(&launch_command,"\"",'\"',0);
@@ -999,9 +1045,6 @@ int main(int argc,char**argv)
 	load_cmd_inject_config("cmd_inject.ini");
 	load_app_list_extra("game_app_list.conf");
 	scan_dir_for_exact_name(&game_exe);
-	sprintf(buffer,"Launch mode: \"%s\"!",launch_mode<3?launch_mode<2?!launch_mode?
-		"Error":"No Launch":"Injector Only":"All Programs Will be Launched");
-	append_string_to_dstr(&log_str,buffer,'\n',0);
 	//creating or parsing "config.bat"
 	f=open_file_on_injector_path("config.bat","r");
 	if(f==NULL)
