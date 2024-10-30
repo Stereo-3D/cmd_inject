@@ -1,4 +1,4 @@
-#define CMD_INJECT_VERSION "v0.4.2"
+#define CMD_INJECT_VERSION "v0.4.3"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
@@ -29,9 +29,11 @@ List of terms inside GPL v3: ^for more detailed terms visit the link above^:\n\
     - Warranty: This software is provided without warranty.\n\
     - Liability: The software author or license can not be held liable for\n\
                  any damages inflicted by the software.\n"
+#include<time.h>//give the prorgam ability to convert the date and detect timezone
 #include<stdio.h>//give the program ability to read and write file
 #include<stdlib.h>//give the program ability to re-allocate memory
 #include<dirent.h>//give the program ability to scan game folder
+#include<sys/time.h>//give the program ability to query system time and measure program speed
 #include"hash.h"//using ReShade's app hash function and database extracted from Overwatch.fxh
 typedef struct Dynamic_String{char*data;int length,alloc;}dstr;
 int check_if_str_is_prefix_of_dstr(dstr*str,int str_index,char*keyword)
@@ -105,7 +107,7 @@ int check_for_special_program_keyword(dstr*str,int left_index,int right_index)
 	str->data[right_index+1]=backup_char;
 	return ret_code;
 }
-dstr log_str;FILE*log_file;char*argv0;
+dstr log_str;FILE*log_file;char*argv0;int skip_clock;
 void append_char_to_dstr(dstr*str,char c,int escape_special)//and log file IO management
 {
 	if(str==&log_str&&log_file==NULL)
@@ -138,8 +140,15 @@ void append_char_to_dstr(dstr*str,char c,int escape_special)//and log file IO ma
 	str->data[str->length++]=c;
 	if(str==&log_str)
 	{
+		if(c!='\n'&&!skip_clock)//print the timestamp in log file if non-blank line is detected
+		{
+			char dates[64];struct timeval now;skip_clock=1;
+			gettimeofday(&now,NULL);time_t now_time=now.tv_sec;
+			strftime(dates,sizeof(dates),"%a|%d-%b-%y|%Z|%H:%M:%S",localtime(&now_time));
+			fprintf(log_file,"[%s.%.6ld] ",dates,now.tv_usec);
+		}
 		if(c!='\0')fputc(c,log_file);
-		if(c=='\n')fflush(log_file);//force to write the log data to disk (clear cache)
+		if(c=='\n'){skip_clock=0;fflush(log_file);}//force to write the log data to disk (clear cache)
 		/* the above operation is slow (especially on non ssd drive)
 		 * but this is necessary to capture all moments while the program alive
 		 * to ensure the log data is saved to disk properly in case of program crash at random
