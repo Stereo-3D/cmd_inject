@@ -1,4 +1,4 @@
-#define CMD_INJECT_VERSION "v0.4.3"
+#define CMD_INJECT_VERSION "v0.4.4"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
@@ -165,6 +165,21 @@ void append_string_to_dstr(dstr*str,char*string,char end_symbol,int write_quotes
 	append_char_to_dstr(str,end_symbol,0);
 	return;
 }
+int convert_arg_to_raw(dstr*arg,dstr*exe)//undo the escape symbol
+{
+	char c;int i=0,escape=exe->length=0;
+	while(++i<arg->length)
+	{
+		if((c=arg->data[i])=='\0')break;
+		if(c=='\"'&&!(escape&1))break;
+		if(escape&1&&(c=='\"'||c=='\\'))exe->data[exe->length-1]=c;
+		else append_char_to_dstr(exe,c,0);
+		escape=c=='\\'?escape+1:0;
+	}
+	append_char_to_dstr(exe,'\0',0);
+	for(i=exe->length;i--;)if((c=exe->data[i])=='\\'||c=='/')break;
+	return++i;
+}
 dstr*argvy;int argiy,argly;char buffer[512],mindiff[512];//argvy is storing game's arguments
 void replace_argvy(char*value)
 {
@@ -201,7 +216,7 @@ int append_folder(dstr*path,char*folder_name,int depth)
 	fldr->paths.alloc=fldr->paths.length=0;
 	if((fldr->dir=opendir(path->data))!=NULL)//try opening folder: /path/foldername
 	{
-		if(depth<depth_limit)//add the new folder to the queue
+		if((unsigned)depth<(unsigned)depth_limit)//add the new folder to the queue
 		{
 			append_string_to_dstr(&fldr->paths,path->data,'\0',0);
 			++folder_len;ret_code=0;
@@ -211,32 +226,63 @@ int append_folder(dstr*path,char*folder_name,int depth)
 	path->length=index;append_char_to_dstr(path,'\0',0);//restore path to original state
 	return ret_code;
 }
-void scan_dir_for_exact_name(dstr*exe)
+int scan_dir_for_hash_match(dstr*exe,int index,int scan_work_dir)
 {
-	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
-	int match=0,index=exe->length,i,folder_now,min_diff=999,depth;
-	char c;DIR*dir;struct dirent*ent;dstr paths,fname;
+	int match=folder_len=0,i=0,folder_now,min_diff=999,depth;
+	char c,s;DIR*dir;struct dirent*ent;dstr paths,fname;
 	fname.length=fname.alloc=0;fname.data=NULL;//initialize data
-	while(index--&&(c=exe->data[index])!='\\'&&c!='/');//find the separator between path and filename
-	append_string_to_dstr(&fname,exe->data+index+1,'\0',0);//backup and copy filename
-	if(!++index)goto try_opening_work_dir;//if no path data found then try opening work dir instead
-	c=folder_separator=exe->data[exe->length=index-1];//get folder separator symbol (could be '\' or '/')
+	paths.length=paths.alloc=0;paths.data=NULL;
+	append_string_to_dstr(&fname,exe->data+index,'\0',0);//backup and copy filename
+	if(!index)goto try_opening_work_dir;//if no path data found then try opening work dir instead
+	s=folder_separator=exe->data[exe->length=index-1];//get folder separator symbol (could be '\' or '/')
 	append_char_to_dstr(exe,'\0',0);//remove filename (leaving only the game paths)
 	depth_limit=depth_limit_game_dir;//set folder search limit
 	if(append_folder(exe,"",0))//try opening folder from game args
 	{
 		append_string_to_dstr(&log_str,"[WARN] Cannot open folder:",' ',0);
-		append_string_to_dstr(&log_str,exe->data,'\n',1);
-		try_opening_work_dir:;
-		exe->length=0;append_string_to_dstr(exe,".",'\0',0);
-		depth_limit=depth_limit_work_dir;folder_separator='/';
-		if(append_folder(exe,"",0))//try opening current working directory
+		append_string_to_dstr(&log_str,exe->data,'!',1);
+		append_string_to_dstr(&log_str," Converting to UNIX format...",'\n',0);
+		if(exe->length>1&&exe->data[1]==':')
 		{
-			//cannot open any folder :( bad os permission?
-			append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
-			append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
+			if((*exe->data=to_lower(*exe->data))=='z')i=2;
+			else
+			{
+				append_string_to_dstr(&paths,getenv("WINEPREFIX"),'/',0);
+				append_string_to_dstr(&paths,"dosdevices/",'\0',0);//trying to open wineprefix
+				if((dir=opendir(paths.data))!=NULL){--paths.length;closedir(dir);}
+				else
+				{
+					paths.length-=12;//revert back to folder $WINEPREFIX$/
+					append_string_to_dstr(&paths,"pfx/dosdevices/",'\0',0);//trying to open protonprefix
+					if((dir=opendir(paths.data))!=NULL){--paths.length;closedir(dir);}
+					else{paths.length=0;i=2;}//no prefix found reseting to drive z
+				}
+			}
+		}
+		else if(*exe->data!='.')append_string_to_dstr(&paths,".",'/',0);
+		for(;(c=exe->data[i++])!='\0';)
+			if((c=c=='\\'?'/':c)!='/'||!paths.length||paths.data[paths.length-1]!='/')
+				append_char_to_dstr(&paths,c,0);
+		append_char_to_dstr(&paths,'\0',0);folder_separator='/';
+		if(append_folder(&paths,"",0))//try opening folder from game args (converted to UNIX format)
+		{
+			append_string_to_dstr(&log_str,"[WARN] Cannot open UNIX folder:",' ',0);
+			append_string_to_dstr(&log_str,paths.data,'\n',1);
+			try_opening_work_dir:;
+			if(scan_work_dir)
+			{
+				paths.length=0;append_string_to_dstr(&paths,".",'\0',0);
+				depth_limit=depth_limit_work_dir;folder_separator='/';
+				if(append_folder(&paths,"",0))//try opening current working directory
+				{
+					//cannot open any folder :( bad os permission?
+					append_string_to_dstr(&log_str,"[WARN] Cannot open any folder,",' ',0);
+					append_string_to_dstr(&log_str,"folder scanner will be aborted!",'\n',0);
+				}
+			}
 		}
 	}
+	if(paths.data)free(paths.data);
 	for(folder_now=-1;++folder_now<folder_len;)//Breadth-first search without recursion :v
 	{
 		dir=folders[folder_now].dir;
@@ -297,15 +343,31 @@ void scan_dir_for_exact_name(dstr*exe)
 		closedir(folders[folder_now].dir);free(folders[folder_now].paths.data);
 	}
 	exe->length=index?index-1:0;//restore exe length
-	if(index)append_char_to_dstr(exe,c,0);//restore exe folder separator
+	if(index)append_char_to_dstr(exe,s,0);//restore exe folder separator
 	append_string_to_dstr(exe,fname.data,'\0',0);//restore exe filename
-	if(0<min_diff&&min_diff<512)replace_argvy(mindiff);//case insensitive match found
+	if(min_diff<512)replace_argvy(mindiff);//case insensitive match found
 	if(match==1)replace_argvy(buffer);//unique application hashes found
 	if(fname.data)free(fname.data);//clean temporary filename variable
+	return match;
+}
+void scan_argvy_for_hash_match()
+{
+	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
+	int i,index;dstr exe;
+	exe.length=exe.alloc=0;exe.data=NULL;
+	for(i=argiy;--i;)
+	{
+		index=convert_arg_to_raw(argvy+i,&exe);
+		append_string_to_dstr(&log_str,"Checking argument:",' ',0);
+		append_string_to_dstr(&log_str,exe.data,'\n',1);
+		if(check_hash(exe.data+index)){replace_argvy(exe.data+index);break;}
+		if(scan_dir_for_hash_match(&exe,index,i==1)==1)break;
+	}
 	if(folders)free(folders);//clean folder stack
+	free(exe.data);
 	return;
 }
-dstr*argvx,launch_command,extra_command,game_exe;//argvx is storing this program's arguments
+dstr*argvx,launch_command,extra_command;//argvx is storing this program's arguments
 int arg_index,arg_index_inside_quotes,game_index,argix,arglx;
 void convert_critical_argument_to_windows_format()//and copy arguments to corresponding var
 {
@@ -322,9 +384,9 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 		converting=0;
 	}
 	else append_string_to_dstr(&log_str,"Converting game argument...",'\n',0);
-	dstr game_arg;
-	game_arg.data=NULL;
-	game_arg.length=game_arg.alloc=0;
+	dstr game_arg,game_exe;
+	game_arg.data=game_exe.data=NULL;
+	game_arg.length=game_arg.alloc=game_exe.length=game_exe.alloc=0;
 	//copying main game argument (and converting it to windows format if required)
 	append_char_to_dstr(&game_arg,'\"',0);
 	if(converting)
@@ -418,8 +480,8 @@ void convert_critical_argument_to_windows_format()//and copy arguments to corres
 	//copy the remaining argument outside of linux shell if exist
 	for(;c!='\0';c=launch_command.data[arg_index+i++])append_char_to_dstr(&extra_command,c,0);
 	//finalizing the data for remaining variables
-	append_char_to_dstr(&extra_command,'\0',0);
-	free(game_arg.data);append_string_to_dstr(&log_str,"Done processing game argument!",'\n',0);
+	append_char_to_dstr(&extra_command,'\0',0);free(game_arg.data);free(game_exe.data);
+	append_string_to_dstr(&log_str,"Done processing game argument!",'\n',0);
 	return;
 }
 int steam_index,nested_shell_detected,launch_mode;
@@ -633,7 +695,7 @@ void load_app_list_extra(char*list_name)
 		fprintf(f,"#      this file overwritten by the program (keep changes permanent)'\n");
 		fprintf(f,"#format: each line is a name of program in with .exe format exstension\n");
 		fprintf(f,"#        you can put \'#\' at the begining of line to comment it\n");
-		fprintf(f,"#There is 817+ apps list already stored inside this program!\n");
+		fprintf(f,"#There is 814+ apps list already stored inside this program!\n");
 		fprintf(f,"#What you want to add here is most likely duplicates ;)\n");
 		//fprintf(f,"GenshinImpact.exe\n");//add duplicates for testing purposes
 		fprintf(f,"r5apex_dx12.exe");//no new line at the end of file for testing purposes
@@ -982,6 +1044,8 @@ void load_cmd_inject_config(char*ini_filename)
 		fprintf(f,";remove the first line if you want to change the variable value!\n");
 		fprintf(f,";depth limit work dir: the recursion depth to scan folder on work dir\n");
 		fprintf(f,";depth limit game dir: the recursion depth to scan folder on game dir\n");
+		fprintf(f,";if recursion depth = 0 then no folder scan will be performed\n");
+		fprintf(f,";if recursion depth <= -1 then recursion depth is unlimited!\n");
 		fprintf(f,"[cmd_inject]\n");
 		fprintf(f,"depth_limit_work_dir = 1\n");
 		fprintf(f,"depth_limit_game_dir = 4\n");
@@ -1032,7 +1096,7 @@ void load_cmd_inject_config(char*ini_filename)
 int main(int argc,char**argv)
 {
 	//receiving argumnents parameter and initializing the program
-	int i,j,ret=0;FILE*f,*ff;argv0=argv[0];
+	int i,j,ret=0;FILE*f,*ff;char b0,b1;argv0=argv[0];
 	sprintf(buffer,"cmd_inject version: %s\nSource code:",CMD_INJECT_VERSION);
 	append_string_to_dstr(&log_str,buffer,' ',0);
 	append_string_to_dstr(&log_str,"https://github.com/Stereo-3D/cmd_inject",'\n',0);
@@ -1053,7 +1117,6 @@ int main(int argc,char**argv)
 	init_injector_path();
 	load_cmd_inject_config("cmd_inject.ini");
 	load_app_list_extra("game_app_list.conf");
-	scan_dir_for_exact_name(&game_exe);
 	//creating or parsing "config.bat"
 	f=open_file_on_injector_path("config.bat","r");
 	if(f==NULL)
@@ -1077,21 +1140,28 @@ int main(int argc,char**argv)
 	{
 		if((char)(j=fgetc(f))=='-'||('0'<=(char)j&&(char)j<='9'))
 		{
-			*buffer='+';buffer[1]='?';
-			if(j=='-'){*buffer='-';j=fgetc(f);}
+			b0='+';b1='?';
+			if(j=='-'){b0='-';j=fgetc(f);}
 			for(i=j,j=0;'0'<=(char)i&&(char)i<='9';i=fgetc(f))j=10*j+(i&15);
-			if((char)i=='*'){buffer[1]='*';i=fgetc(f);}
+			if((char)i=='*'){b1='*';i=fgetc(f);}
 			if((char)i<=' ')
 			{
-				if(*buffer=='-'&&buffer[1]=='*')write_remaining_game_arguments_to_file(ff,j);
-				if(*buffer=='+'&&buffer[1]=='*')write_remaining_arguments_to_file(ff,j);
-				if(*buffer=='-'&&buffer[1]=='?')write_game_argument_to_file(ff,j);
-				if(*buffer=='+'&&buffer[1]=='?')write_argument_to_file(ff,j);
+				if(b0=='-'&&!j&&!ret){scan_argvy_for_hash_match();ret=1;}
+				if(b0=='-'&&b1=='*')write_remaining_game_arguments_to_file(ff,j);
+				if(b0=='+'&&b1=='*')write_remaining_arguments_to_file(ff,j);
+				if(b0=='-'&&b1=='?')write_game_argument_to_file(ff,j);
+				if(b0=='+'&&b1=='?')write_argument_to_file(ff,j);
 			}
-			else fprintf(ff,"%%%s%d%s",*buffer=='-'?"-":"",j,buffer[1]=='*'?"*":"");
+			else fprintf(ff,"%%%s%d%s",b0=='-'?"-":"",j,b1=='*'?"*":"");
 		}
 		else{fputc('%',ff);i=j;}
 		if(i==EOF)break;
+	}
+	if(ret)ret=0;
+	else
+	{
+		append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
+		append_string_to_dstr(&log_str,"No need to scan folder because no demand from injector!",'\n',0);
 	}
 	fclose(f);fclose(ff);
 	//attempting to inject launcher.bat to launch command
@@ -1106,8 +1176,7 @@ int main(int argc,char**argv)
 	append_string_to_dstr(&log_str,launch_command.data,'\0',0);
 	//cleaning up and freeing memory
 	for(i=-1;++i<argix;)free(argvx[i].data);
-	free(argvx);free(extra_command.data);free(injector_path.data);
-	free(log_str.data);free(game_exe.data);free(hashes);
+	free(argvx);free(extra_command.data);free(injector_path.data);free(log_str.data);free(hashes);
 	if(launch_mode&2)ret=system(launch_command.data);//launching injected launch command
 	free(launch_command.data);
 	return ret;
