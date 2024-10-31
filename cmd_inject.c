@@ -345,8 +345,8 @@ int scan_dir_for_hash_match(dstr*exe,int index,int scan_work_dir)
 	exe->length=index?index-1:0;//restore exe length
 	if(index)append_char_to_dstr(exe,s,0);//restore exe folder separator
 	append_string_to_dstr(exe,fname.data,'\0',0);//restore exe filename
-	if(min_diff<512)replace_argvy(mindiff);//case insensitive match found
 	if(match==1)replace_argvy(buffer);//unique application hashes found
+	else if(min_diff<512)replace_argvy(mindiff);//case insensitive match found
 	if(fname.data)free(fname.data);//clean temporary filename variable
 	return match;
 }
@@ -695,7 +695,7 @@ void load_app_list_extra(char*list_name)
 		fprintf(f,"#      this file overwritten by the program (keep changes permanent)'\n");
 		fprintf(f,"#format: each line is a name of program in with .exe format exstension\n");
 		fprintf(f,"#        you can put \'#\' at the begining of line to comment it\n");
-		fprintf(f,"#There is 814+ apps list already stored inside this program!\n");
+		fprintf(f,"#There are %d+ apps list already stored inside this program!\n",overwatch_len);
 		fprintf(f,"#What you want to add here is most likely duplicates ;)\n");
 		//fprintf(f,"GenshinImpact.exe\n");//add duplicates for testing purposes
 		fprintf(f,"r5apex_dx12.exe");//no new line at the end of file for testing purposes
