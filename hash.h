@@ -1,4 +1,5 @@
-int overwatch_len=814;unsigned overwatch_hash[]={//data extracted from Overwatch.fxh
+#include <stdlib.h>
+static int overwatch_len=814;static unsigned overwatch_hash[]={//data extracted from Overwatch.fxh
 0x31192u,0x819e0u,0x578862u,0x907dd9u,0xd0aa19u,0x16afd3du,0x1b35716u,0x21cb998u,
 0x2784e9du,0x2ea57cau,0x2ece874u,0x34f4b6cu,0x3f017cfu,0x42c1a2bu,0x4baa047u,0x54568eau,
 0x5ae985cu,0x5d510adu,0x5f1e44du,0x6250a9eu,0x6ab553au,0x6ea7bbbu,0x70858d6u,0x7281105u,
@@ -101,50 +102,50 @@ int overwatch_len=814;unsigned overwatch_hash[]={//data extracted from Overwatch
 0xf9b1845au,0xfa2c0106u,0xfa493601u,0xfa52c2bau,0xfa6649d4u,0xfab47970u,0xfb111509u,0xfb9a99abu,
 0xfbc55ddeu,0xfbee8027u,0xfc113d8au,0xfc94d8e3u,0xfc960068u,0xfd3749fcu,0xfd3da5a0u,0xfd4c916du,
 0xfe54bf56u,0xfe7a4c2eu,0xfe7d9e7eu,0xfe89f0ffu,0xff3a6b3eu,0xff64489du};
-char to_lower(char c){return('A'<=c&&c<='Z')?c^32:c;}
-int is_both_string_equal(char*a,char*b)
+static char to_lower(char c){return('A'<=c&&c<='Z')?c^32:c;}
+static int is_both_string_equal(char*a,char*b)
 {
 	while(*a!='\0'&&*b!='\0')if(*a++!=*b++)return 0;
 	return*a==*b;
 }
-int cmp(const void*a,const void*b)
+static int cmp(const void*a,const void*b)
 {
 	if(*(unsigned*)a>*(unsigned*)b)return 1;
 	if(*(unsigned*)a<*(unsigned*)b)return-1;
 	return 0;
 }
-int hash_len,hash_alloc;
-unsigned*hashes;
-void hash_list_add(unsigned hash)
+static int hash_len,hash_alloc;
+static unsigned*hashes;
+static void hash_list_add(unsigned hash)
 {
 	if(hash_len==hash_alloc)
 		hashes=(unsigned*)realloc(hashes,(hash_alloc=hash_alloc<<1|1)*sizeof(unsigned));
 	hashes[hash_len++]=hash;
 	return;
 }
-void hash_init()
+static void hash_init(void)
 {
 	int i;
 	for(i=-1;++i<overwatch_len;)hash_list_add(overwatch_hash[i]);
 	return;
 }
-int hash_finalize()
+static int hash_finalize(void)
 {
 	int i,j;qsort(hashes,hash_len,sizeof(unsigned),cmp);
 	for(i=j=0;++j<hash_len;)if(hashes[i]!=hashes[j])hashes[++i]=hashes[j];
 	hash_len=++i;//remove duplicates
 	return j-i;//return number of hash duplicates
 }
-long long unsigned hash64a;
-void hash_reset(){hash64a=14695981039346656037llu;return;}
-void hash_add_byte(unsigned char c){hash64a=(hash64a^c)*1099511628211llu;return;}
-unsigned hash(char*str)
+static long long unsigned hash64a;
+static void hash_reset(void){hash64a=14695981039346656037llu;return;}
+static void hash_add_byte(unsigned char c){hash64a=(hash64a^c)*1099511628211llu;return;}
+static unsigned hash(char*str)
 {
 	hash_reset();
 	while(*str!='\0')hash_add_byte(*str++);
 	return hash64a;
 }
-int hash_app_add(char*str)
+static int hash_app_add(char*str)
 {
 	int i,j=-1;
 	for(i=-1;str[++i]!='\0';)if(str[i]=='.')j=i;
@@ -155,7 +156,7 @@ int hash_app_add(char*str)
 	str[j]='\0';hash_list_add(hash(str));str[j]='.';
 	return 0;
 }
-int check_hash(char*str)
+static int check_hash(char*str)
 {
 	int i,j=-1;unsigned*res;
 	for(i=-1;str[++i]!='\0';)if(str[i]=='.')j=i;
@@ -167,7 +168,7 @@ int check_hash(char*str)
 	res=(unsigned*)bsearch(&i,hashes,hash_len,sizeof(unsigned),cmp);
 	return res!=NULL;
 }
-int compare_case_insensitive(char*a,char*b)
+static int compare_case_insensitive(char*a,char*b)
 {
 	int penalty=0;
 	while(*a!='\0'&&*b!='\0')

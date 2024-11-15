@@ -1,4 +1,4 @@
-#define CMD_INJECT_VERSION "v0.4.4"
+#define CMD_INJECT_VERSION "v0.4.5"
 #define LICENSE "===[LICENSE.txt]===\n\
 cmd_inject: Command injector for both Steam Windows and Steam Linux\n\
             plus some other launcher with editable launch command\n\
@@ -7,7 +7,7 @@ Special Thanks:\n\
   - Jose Negrete AKA BlueSkyDefender <UntouchableBlueSky@gmail.com>\n\
       for leting me extract and using list of App hash database from his awesome \"Overwatch.fxh\":\n\
         https://github.com/BlueSkyDefender/Depth3D/blob/master/Shaders/Overwatch.fxh\n\
-Copyright © 2024 Tjandra Satria Gunawan\n\
+Copyright \xa9 2024 Tjandra Satria Gunawan\n\
   (Email: tjandra@yandex.com | Youtube: https://youtube.com/@TjandraSG | Discord: tjandra)\n\
 License: GNU GENERAL PUBLIC LICENSE\n\
          Version 3, 29 June 2007\n\
@@ -350,7 +350,7 @@ int scan_dir_for_hash_match(dstr*exe,int index,int scan_work_dir)
 	if(fname.data)free(fname.data);//clean temporary filename variable
 	return match;
 }
-void scan_argvy_for_hash_match()
+void scan_argvy_for_hash_match(void)
 {
 	append_string_to_dstr(&log_str,"\n===[Folder Scanner]===",'\n',0);
 	int i,index;dstr exe;
@@ -369,7 +369,7 @@ void scan_argvy_for_hash_match()
 }
 dstr*argvx,launch_command,extra_command;//argvx is storing this program's arguments
 int arg_index,arg_index_inside_quotes,game_index,argix,arglx;
-void convert_critical_argument_to_windows_format()//and copy arguments to corresponding var
+void convert_critical_argument_to_windows_format(void)//and copy arguments to corresponding var
 {
 	//Initializing the converter
 	append_string_to_dstr(&log_str,"\n===[Argument Converter]===",'\n',0);
@@ -633,7 +633,7 @@ void write_remaining_game_arguments_to_file(FILE*f,int from_index)
  *  the folder where the cmd_inject executable is located
  */
 int injector_path_index;dstr injector_path;
-void init_injector_path()//find the path of cmd_inject and save it
+void init_injector_path(void)//find the path of cmd_inject and save it
 {
 	append_string_to_dstr(&log_str,"\n===[injector path]===",'\n',0);
 	append_string_to_dstr(&log_str,"Detecting injector path...",'\n',0);
